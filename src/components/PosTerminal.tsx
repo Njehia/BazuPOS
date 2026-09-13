@@ -6,6 +6,7 @@ import {
   Clock,
   Code2,
   FileText,
+  Home,
   KeyRound,
   Lock,
   Minus,
@@ -48,6 +49,7 @@ import { ChangePasswordModal } from './ChangePasswordModal';
 import { PrintReceiptModule } from './PrintReceiptModule';
 import { BazuLogo } from './BazuLogo';
 import { PWAInstallButton } from './PWAInstallButton';
+import { HomeMenuScreen } from './HomeMenuScreen';
 
 interface PosTerminalProps {
   currentUser: UserModel;
@@ -64,6 +66,9 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomerForSale, setSelectedCustomerForSale] = useState<Customer | null>(null);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+
+  // Navigation: First screen after login is 'home' (Menu First), user chooses where to go first
+  const [currentView, setCurrentView] = useState<'home' | 'pos'>('home');
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -224,7 +229,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
 
   const handleOpenAdmin = (tab: AdminTab = 'inventory') => {
     setAdminInitialTab(tab);
-    if (currentUser.role === 'ADMIN') {
+    if (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') {
       setUnlockedAdminUser(null);
       setIsAdminOpen(true);
     } else {
@@ -232,6 +237,39 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       setAdminPinInput('');
       setAdminPinError('');
     }
+  };
+
+  const handleHomeNavigate = (
+    destination:
+      | 'pos'
+      | 'inventory'
+      | 'customers'
+      | 'summary'
+      | 'categories'
+      | 'receipts'
+      | 'users'
+      | 'store'
+      | 'flutter_code'
+  ) => {
+    if (destination === 'pos') {
+      setCurrentView('pos');
+    } else if (destination === 'receipts') {
+      setIsPrintReceiptModuleOpen(true);
+    } else if (destination === 'flutter_code') {
+      setIsFlutterCodeOpen(true);
+    } else {
+      handleOpenAdmin(destination as AdminTab);
+    }
+  };
+
+  const handleGoHome = () => {
+    setCurrentView('home');
+    setIsAdminOpen(false);
+    setIsPrintReceiptModuleOpen(false);
+    setIsFlutterCodeOpen(false);
+    setIsMobileCartOpen(false);
+    setIsCheckoutOpen(false);
+    setShowAdminPinPrompt(false);
   };
 
   const handleVerifyAdminPinPrompt = (e: React.FormEvent) => {
@@ -420,23 +458,49 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   );
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden select-none">
-      {/* Top Header - Deep Indigo #1E1B4B with Amber Badge */}
-      <header className="h-16 bg-[#1E1B4B] text-white flex items-center justify-between px-4 sm:px-6 shadow-md shrink-0">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <BazuLogo className="w-10 h-10 shrink-0 shadow-md hover:scale-105 transition-transform cursor-pointer" />
-          <div className="leading-tight">
-            <h1 className="text-sm sm:text-base font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
-              <span>{storeConfig.store_name}</span>
-            </h1>
-            <p className="text-xs text-slate-300">
-              {storeConfig.branch} | Terminal {storeConfig.till_number}
-            </p>
-          </div>
-        </div>
+    <div className="w-screen h-screen overflow-hidden bg-slate-900 font-sans text-slate-800 select-none">
+      {currentView === 'home' ? (
+        <HomeMenuScreen
+          currentUser={activeUser}
+          storeConfig={storeConfig}
+          cart={cart}
+          onNavigate={handleHomeNavigate}
+          onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+          onLogout={onLogout}
+        />
+      ) : (
+        <div className="flex flex-col h-screen w-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden select-none">
+          {/* Top Header - Deep Indigo #1E1B4B with Amber Badge */}
+          <header className="h-16 bg-[#1E1B4B] text-white flex items-center justify-between px-4 sm:px-6 shadow-md shrink-0">
+            <div
+              onClick={handleGoHome}
+              className="flex items-center gap-3 sm:gap-4 cursor-pointer group"
+              title="Return to Main Menu / First Screen"
+            >
+              <BazuLogo className="w-10 h-10 shrink-0 shadow-md group-hover:scale-105 transition-transform" />
+              <div className="leading-tight">
+                <h1 className="text-sm sm:text-base font-bold uppercase tracking-wider text-white flex items-center gap-1.5">
+                  <span>{storeConfig.store_name}</span>
+                </h1>
+                <p className="text-xs text-slate-300">
+                  {storeConfig.branch} | Terminal {storeConfig.till_number}
+                </p>
+              </div>
+            </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
-          {/* Mobile & Minimized Screen Cart Toggle Button */}
+            <div className="flex items-center gap-2 sm:gap-4">
+              {/* Home Page Button */}
+              <button
+                type="button"
+                onClick={handleGoHome}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-xs transition-all cursor-pointer"
+                title="Return to Main Menu / First Screen"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Home</span>
+              </button>
+
+              {/* Mobile & Minimized Screen Cart Toggle Button */}
           <button
             type="button"
             onClick={() => setIsMobileCartOpen(true)}
@@ -748,7 +812,17 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       )}
 
       {/* Bottom Sleek Navigation Bar */}
-      <nav className="h-12 bg-white border-t border-slate-200 flex items-center justify-center gap-6 sm:gap-12 shrink-0 select-none">
+      <nav className="h-12 bg-white border-t border-slate-200 flex items-center justify-center gap-4 sm:gap-10 shrink-0 select-none">
+        <button
+          type="button"
+          onClick={handleGoHome}
+          className="flex items-center gap-1.5 text-slate-700 hover:text-amber-600 font-black h-full px-3 text-xs tracking-wider cursor-pointer transition-colors"
+          title="Return to Main Menu / First Screen"
+        >
+          <Home className="w-4 h-4 text-amber-500" />
+          <span>HOME</span>
+        </button>
+
         <div className="flex items-center gap-2 text-amber-600 font-bold border-b-2 border-amber-600 h-full px-4 text-xs tracking-widest cursor-pointer">
           <span className="text-lg">🛒</span> TERMINAL
         </div>
@@ -784,6 +858,8 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
           <span className="text-lg opacity-60">💻</span> FLUTTER CODE
         </div>
       </nav>
+        </div>
+      )}
 
       {/* Change Password Modal */}
       {isChangePasswordOpen && (
@@ -834,11 +910,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
             setUnlockedAdminUser(null);
             refreshInventory();
           }}
+          onGoHome={handleGoHome}
           onInventoryChanged={refreshInventory}
           onStoreConfigChanged={(cfg) => setStoreConfig(cfg)}
           onSelectCustomerForSale={(customer) => {
             setSelectedCustomerForSale(customer);
             setIsAdminOpen(false);
+            setCurrentView('pos');
             if (cart.length > 0) {
               setIsCheckoutOpen(true);
             }
@@ -856,6 +934,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
         <PrintReceiptModule
           storeConfig={storeConfig}
           onClose={() => setIsPrintReceiptModuleOpen(false)}
+          onGoHome={handleGoHome}
         />
       )}
 

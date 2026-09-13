@@ -10,6 +10,7 @@ import {
   Banknote,
   X,
   FileText,
+  Home,
   Clock,
   User,
   ShoppingBag,
@@ -22,12 +23,14 @@ import { LocalDb } from '../lib/storage';
 interface PrintReceiptModuleProps {
   storeConfig: StoreConfig;
   onClose: () => void;
+  onGoHome?: () => void;
   initialSaleId?: number;
 }
 
 export const PrintReceiptModule: React.FC<PrintReceiptModuleProps> = ({
   storeConfig,
   onClose,
+  onGoHome,
   initialSaleId,
 }) => {
   const [sales, setSales] = useState<Sale[]>(() => LocalDb.getSales());
@@ -217,14 +220,31 @@ export const PrintReceiptModule: React.FC<PrintReceiptModuleProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            title="Close Print Module (Esc)"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onGoHome && (
+              <button
+                type="button"
+                onClick={() => {
+                  onGoHome();
+                  onClose();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="Return to Main Menu / Home Screen"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span>Home</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+              title="Close Print Module (Esc)"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </header>
 
         {/* Module Body: Two Columns */}

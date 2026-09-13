@@ -19,6 +19,7 @@ import {
   FileText,
   Filter,
   History,
+  Home,
   Info,
   KeyRound,
   Lock,
@@ -69,6 +70,7 @@ interface AdminOverlayProps {
   currentUser: User;
   initialTab?: AdminTab;
   onClose: () => void;
+  onGoHome?: () => void;
   onInventoryChanged: () => void;
   onStoreConfigChanged: (config: StoreConfig) => void;
   onSelectCustomerForSale?: (customer: any) => void;
@@ -78,6 +80,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   currentUser,
   initialTab,
   onClose,
+  onGoHome,
   onInventoryChanged,
   onStoreConfigChanged,
   onSelectCustomerForSale,
@@ -650,11 +653,28 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
     <div className="fixed inset-0 z-40 bg-[#F8FAFC] text-slate-800 flex flex-col overflow-hidden animate-fade-in">
       {/* Top Navbar */}
       <header className="h-16 px-4 sm:px-6 bg-[#1E1B4B] text-white flex items-center justify-between shrink-0 shadow-sm">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Home Page Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onGoHome) {
+                onGoHome();
+              }
+              onClose();
+            }}
+            className="p-2 sm:px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors flex items-center gap-1.5 text-xs font-black cursor-pointer shadow-xs"
+            title="Return to Home Menu"
+          >
+            <Home className="w-4 h-4" />
+            <span className="hidden sm:inline">Home</span>
+          </button>
+
           <button
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            title="Close overlay"
           >
             <ArrowLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Back to POS</span>
