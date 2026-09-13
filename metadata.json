@@ -1,0 +1,6 @@
+{
+  "name": "Bazu POS",
+  "description": "Cloud-connected, real-time synchronized Point of Sale (POS) application for liquor retail in Nairobi with multi-device live sync across computers and phones, secure username & password staff login, M-Pesa & Cash checkout, inventory control, and sales auditing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

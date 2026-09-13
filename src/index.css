@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@media print {
+  /* Hide all app chrome, backdrops, and navigation */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Only display the thermal receipt content */
+  #thermal-receipt, #thermal-receipt * {
+    visibility: visible !important;
+  }
+
+  #thermal-receipt {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 78mm !important;
+    max-width: 78mm !important;
+    margin: 0 !important;
+    padding: 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: monospace !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  #thermal-receipt.paper-58mm {
+    width: 54mm !important;
+    max-width: 54mm !important;
+    font-size: 9.5px !important;
+    padding: 2mm !important;
+  }
+
+  @page {
+    margin: 0;
+    size: auto;
+  }
+}

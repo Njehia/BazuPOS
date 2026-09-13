@@ -1,0 +1,129 @@
+{
+  "entities": {
+    "products": {
+      "title": "Product",
+      "description": "Inventory product item in the POS store",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique numeric ID of the product" },
+        "barcode": { "type": "string", "description": "Barcode or SKU for scanning" },
+        "name": { "type": "string", "description": "Product display name" },
+        "category": { "type": "string", "description": "Beverage category" },
+        "price": { "type": "number", "description": "Selling price in KES" },
+        "stock_qty": { "type": "number", "description": "Current on-hand stock quantity" },
+        "unit": { "type": "string", "description": "Unit volume or size e.g. 500ml" },
+        "updated_at": { "type": "string", "description": "Last update ISO timestamp" }
+      },
+      "required": ["id", "barcode", "name", "category", "price", "stock_qty", "unit"]
+    },
+    "sales": {
+      "title": "Sale",
+      "description": "Completed sales transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Numeric transaction receipt number" },
+        "cashier_name": { "type": "string", "description": "Name of the cashier who processed the sale" },
+        "total_amount": { "type": "number", "description": "Total order amount in KES" },
+        "payment_method": { "type": "string", "description": "Payment mode CASH or MPESA" },
+        "created_at": { "type": "string", "description": "Transaction completion timestamp" },
+        "mpesa_code": { "type": "string", "description": "M-Pesa confirmation code if applicable" },
+        "cash_tendered": { "type": "number", "description": "Cash given by customer" },
+        "change_given": { "type": "number", "description": "Change returned to customer" },
+        "items_count": { "type": "number", "description": "Count of items purchased" }
+      },
+      "required": ["id", "cashier_name", "total_amount", "payment_method", "created_at", "items_count"]
+    },
+    "sale_items": {
+      "title": "SaleItem",
+      "description": "Itemized line item within a sale",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique line item ID" },
+        "sale_id": { "type": "number", "description": "Associated sale receipt ID" },
+        "product_id": { "type": "number", "description": "Associated product ID" },
+        "product_name": { "type": "string", "description": "Name of product at time of sale" },
+        "quantity": { "type": "number", "description": "Quantity purchased" },
+        "unit_price": { "type": "number", "description": "Unit price in KES" },
+        "total_price": { "type": "number", "description": "Line item total amount in KES" }
+      },
+      "required": ["id", "sale_id", "product_id", "product_name", "quantity", "unit_price", "total_price"]
+    },
+    "users": {
+      "title": "User",
+      "description": "Staff member account for POS and Admin access",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique numeric user ID" },
+        "name": { "type": "string", "description": "Full staff name" },
+        "username": { "type": "string", "description": "Username used for login" },
+        "pin": { "type": "string", "description": "Security PIN or password" },
+        "role": { "type": "string", "description": "Assigned role ADMIN, SUPERVISOR, ACCOUNTANT, SALES_CASHIER" },
+        "status": { "type": "string", "description": "ACTIVE or SUSPENDED" },
+        "suspended": { "type": "boolean", "description": "Suspension flag" },
+        "must_change_password": { "type": "boolean", "description": "Whether user is required to change password on next login" },
+        "has_changed_initial_password": { "type": "boolean", "description": "Whether user has changed initial default password" },
+        "created_at": { "type": "string", "description": "Account creation timestamp" }
+      },
+      "required": ["id", "name", "role", "pin"]
+    },
+    "store_config": {
+      "title": "StoreConfig",
+      "description": "Store branding and checkout configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Config record ID" },
+        "store_name": { "type": "string", "description": "Store name printed on receipts" },
+        "branch": { "type": "string", "description": "Branch location" },
+        "phone_number": { "type": "string", "description": "Support and Till phone number" },
+        "till_number": { "type": "string", "description": "M-Pesa Buy Goods Till number" },
+        "receipt_footer": { "type": "string", "description": "Footer message on receipt" },
+        "primary_color": { "type": "string", "description": "UI theme accent color" }
+      },
+      "required": ["store_name", "branch", "till_number"]
+    },
+    "categories": {
+      "title": "Category",
+      "description": "Product beverage and merchandise category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Category unique slug identifier" },
+        "name": { "type": "string", "description": "Display name of the category" },
+        "description": { "type": "string", "description": "Optional category description" },
+        "icon": { "type": "string", "description": "Optional emoji or icon symbol" },
+        "created_at": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "name"]
+    },
+    "customers": {
+      "title": "Customer",
+      "description": "Patron profile tracking purchase history and credit debt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique numeric customer ID" },
+        "name": { "type": "string", "description": "Full customer name" },
+        "phone": { "type": "string", "description": "Customer phone number for WhatsApp and SMS" },
+        "email": { "type": "string", "description": "Optional customer email" },
+        "notes": { "type": "string", "description": "Staff notes regarding customer" },
+        "created_at": { "type": "string", "description": "Registration ISO timestamp" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "customer_payments": {
+      "title": "CustomerPayment",
+      "description": "Debt settlement and repayment transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique numeric payment ID" },
+        "customer_id": { "type": "number", "description": "Associated customer ID" },
+        "customer_name": { "type": "string", "description": "Name of customer paying" },
+        "amount": { "type": "number", "description": "Amount paid towards debt in KES" },
+        "payment_method": { "type": "string", "description": "Payment mode CASH or MPESA" },
+        "mpesa_code": { "type": "string", "description": "M-Pesa confirmation code" },
+        "cashier_name": { "type": "string", "description": "Staff member who received the payment" },
+        "created_at": { "type": "string", "description": "Payment ISO timestamp" },
+        "notes": { "type": "string", "description": "Optional payment notes" }
+      },
+      "required": ["id", "customer_id", "customer_name", "amount", "payment_method", "cashier_name", "created_at"]
+    }
+  }
+}
