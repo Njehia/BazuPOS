@@ -11,9 +11,10 @@ import {
   limit,
   writeBatch,
   enableIndexedDbPersistence,
+  deleteDoc,
 } from 'firebase/firestore';
 import configData from '../../firebase-applet-config.json';
-import { Category, Customer, CustomerPayment, Product, Sale, SaleItem, StoreConfig, User } from '../types';
+import { Category, Customer, CustomerPayment, Product, Requisition, Sale, SaleItem, StoreConfig, User } from '../types';
 
 export const firebaseConfig = {
   projectId: configData.projectId,
@@ -46,6 +47,7 @@ export const COLLECTIONS = {
   CATEGORIES: 'categories',
   CUSTOMERS: 'customers',
   CUSTOMER_PAYMENTS: 'customer_payments',
+  REQUISITIONS: 'requisitions',
 };
 
 // Live Cloud Sync state subscribers
@@ -110,6 +112,17 @@ export class CloudDb {
       notifySyncStatus(true);
     } catch (err) {
       console.warn('CloudDb.batchSetProducts error:', err);
+    }
+  }
+
+  // Delete product from cloud
+  static async deleteProduct(productId: number): Promise<void> {
+    try {
+      const ref = doc(db, COLLECTIONS.PRODUCTS, String(productId));
+      await deleteDoc(ref);
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.deleteProduct error:', err);
     }
   }
 
@@ -252,6 +265,17 @@ export class CloudDb {
       notifySyncStatus(true);
     } catch (err) {
       console.warn('CloudDb.batchSetUsers error:', err);
+    }
+  }
+
+  // Delete user from cloud
+  static async deleteUser(userId: number): Promise<void> {
+    try {
+      const ref = doc(db, COLLECTIONS.USERS, String(userId));
+      await deleteDoc(ref);
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.deleteUser error:', err);
     }
   }
 
@@ -471,6 +495,62 @@ export class CloudDb {
       },
       (error) => {
         console.warn('Live customer payments snapshot error:', error);
+      }
+    );
+  }
+
+  // ==========================================
+  // REQUISITIONS REAL-TIME SYNC
+  // ==========================================
+  static async setRequisition(req: Requisition): Promise<void> {
+    try {
+      const ref = doc(db, COLLECTIONS.REQUISITIONS, String(req.id));
+      await setDoc(ref, req, { merge: true });
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.setRequisition error:', err);
+    }
+  }
+
+  static async batchSetRequisitions(requisitions: Requisition[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      for (const r of requisitions) {
+        const ref = doc(db, COLLECTIONS.REQUISITIONS, String(r.id));
+        batch.set(ref, r, { merge: true });
+      }
+      await batch.commit();
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.batchSetRequisitions error:', err);
+    }
+  }
+
+  static async deleteRequisition(reqId: string): Promise<void> {
+    try {
+      const ref = doc(db, COLLECTIONS.REQUISITIONS, String(reqId));
+      await deleteDoc(ref);
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.deleteRequisition error:', err);
+    }
+  }
+
+  static onRequisitionsSnapshot(callback: (requisitions: Requisition[]) => void): () => void {
+    const colRef = collection(db, COLLECTIONS.REQUISITIONS);
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: Requisition[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push(docSnap.data() as Requisition);
+        });
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        notifySyncStatus(true);
+        callback(list);
+      },
+      (error) => {
+        console.warn('Live requisitions snapshot error:', error);
       }
     );
   }

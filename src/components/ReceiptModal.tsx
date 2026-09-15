@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { Sale, SaleItem, StoreConfig } from '../types';
+import { maskPhoneNumber } from '../lib/phoneUtils';
 
 interface ReceiptModalProps {
   sale: Sale;
@@ -59,7 +60,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       `Receipt: RCP-${sale.id.toString().slice(-6)}`,
       `Date: ${formattedDate}`,
       `Cashier: ${cashierName || sale.cashier_name}`,
-      sale.customer_name ? `Customer: ${sale.customer_name} (${sale.customer_phone || ''})` : '',
+      sale.customer_name ? `Customer: ${sale.customer_name} (${maskPhoneNumber(sale.customer_phone)})` : '',
       `Payment: ${sale.payment_method}${sale.mpesa_code ? ` (${sale.mpesa_code})` : ''}`,
       sale.payment_status ? `Status: ${sale.payment_status}` : '',
       divider,
@@ -232,49 +233,52 @@ Thank you for your business! 🍷`;
         <div className="p-6 overflow-y-auto flex-1 bg-slate-200/70 flex justify-center">
           <div
             id="thermal-receipt"
-            style={{ maxWidth: paperWidth === '58mm' ? '240px' : '340px' }}
-            className="w-full bg-white text-slate-900 p-5 rounded-md shadow-md font-mono text-xs border-t-8 border-amber-500 print:shadow-none print:m-0 transition-all"
+            style={{
+              maxWidth: paperWidth === '58mm' ? '260px' : '360px',
+              borderTopColor: 'var(--theme-receipt-border, #d97706)',
+            }}
+            className="w-full bg-white text-black p-5 rounded-md shadow-md font-mono text-sm border-t-8 print:shadow-none print:m-0 transition-all font-bold"
           >
             {/* Store Branding */}
-            <div className="text-center pb-3 border-b border-dashed border-stone-400">
-              <div className="font-extrabold text-base tracking-wider uppercase text-stone-950">
+            <div className="text-center pb-3 border-b-2 border-dashed border-black">
+              <div className="print-title font-black text-lg tracking-wider uppercase text-black">
                 {storeConfig.store_name}
               </div>
-              <div className="text-[11px] text-stone-600 font-sans font-medium">{storeConfig.branch}</div>
-              <div className="text-[11px] text-stone-600">Tel: {storeConfig.phone_number}</div>
-              <div className="text-[11px] font-bold text-emerald-800 mt-0.5">
+              <div className="print-header-sub text-xs text-black font-bold">{storeConfig.branch}</div>
+              <div className="print-header-sub text-xs text-black font-bold">Tel: {storeConfig.phone_number}</div>
+              <div className="print-header-sub text-xs font-black text-black mt-0.5">
                 M-PESA TILL: {storeConfig.till_number}
               </div>
             </div>
 
             {/* Meta Details */}
-            <div className="py-2.5 border-b border-dashed border-stone-400 text-[11px] space-y-1">
+            <div className="print-meta py-2.5 border-b-2 border-dashed border-black text-xs font-bold space-y-1 text-black">
               <div className="flex justify-between">
-                <span className="text-stone-500">Date:</span>
-                <span>{formattedDate}</span>
+                <span>Date:</span>
+                <span className="font-mono">{formattedDate}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-stone-500">Receipt No:</span>
-                <span className="font-bold">RCP-{sale.id.toString().slice(-6)}</span>
+                <span>Receipt No:</span>
+                <span className="font-bold font-mono">RCP-{sale.id.toString().slice(-6)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-stone-500">Cashier:</span>
-                <span>{cashierName || sale.cashier_name}</span>
+                <span>Cashier:</span>
+                <span className="font-bold">{cashierName || sale.cashier_name}</span>
               </div>
 
               {sale.customer_name && (
-                <div className="flex justify-between bg-stone-100 px-1.5 py-0.5 rounded text-stone-900 font-semibold">
+                <div className="flex justify-between bg-stone-100 px-1.5 py-0.5 rounded text-black font-bold">
                   <span>Client:</span>
                   <span>
                     {sale.customer_name}
-                    {sale.customer_phone ? ` (${sale.customer_phone})` : ''}
+                    {sale.customer_phone ? ` (${maskPhoneNumber(sale.customer_phone)})` : ''}
                   </span>
                 </div>
               )}
 
               <div className="flex justify-between">
-                <span className="text-stone-500">Payment:</span>
-                <span className="font-bold text-stone-900">
+                <span>Payment:</span>
+                <span className="font-black text-black">
                   {sale.payment_method === 'MPESA'
                     ? 'M-PESA EXPRESS'
                     : sale.payment_method === 'DEBT'
@@ -285,23 +289,15 @@ Thank you for your business! 🍷`;
 
               {sale.payment_status && (
                 <div className="flex justify-between">
-                  <span className="text-stone-500">Status:</span>
-                  <span
-                    className={`font-bold ${
-                      sale.payment_status === 'DEBT'
-                        ? 'text-rose-600'
-                        : sale.payment_status === 'PARTIAL'
-                        ? 'text-amber-700'
-                        : 'text-emerald-700'
-                    }`}
-                  >
+                  <span>Status:</span>
+                  <span className="font-black text-black">
                     {sale.payment_status}
                   </span>
                 </div>
               )}
 
               {sale.mpesa_code && (
-                <div className="flex justify-between text-emerald-700 font-bold">
+                <div className="flex justify-between font-black text-black">
                   <span>M-Pesa Ref:</span>
                   <span className="font-mono">{sale.mpesa_code}</span>
                 </div>
@@ -309,23 +305,23 @@ Thank you for your business! 🍷`;
             </div>
 
             {/* Line Items Table */}
-            <div className="py-3 border-b border-dashed border-stone-400">
-              <table className="w-full text-left">
+            <div className="py-3 border-b-2 border-dashed border-black">
+              <table className="print-items-table w-full text-left">
                 <thead>
-                  <tr className="border-b border-stone-300 text-[10px] text-stone-500 uppercase">
+                  <tr className="border-b-2 border-black text-xs text-black uppercase font-black">
                     <th className="pb-1">Item</th>
                     <th className="pb-1 text-center">Qty</th>
                     <th className="pb-1 text-right">Price</th>
                     <th className="pb-1 text-right">Total</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-stone-100">
+                <tbody className="divide-y divide-black/30">
                   {items.map((item, idx) => (
-                    <tr key={`receipt-row-${item.id || item.product_id || idx}-${idx}`} className="text-[11px]">
-                      <td className="py-1.5 font-medium max-w-[120px] truncate">{item.product_name}</td>
-                      <td className="py-1.5 text-center">{item.quantity}</td>
-                      <td className="py-1.5 text-right">{item.unit_price.toLocaleString()}</td>
-                      <td className="py-1.5 text-right font-bold">{item.total_price.toLocaleString()}</td>
+                    <tr key={`receipt-row-${item.id || item.product_id || idx}-${idx}`} className="text-xs font-bold text-black">
+                      <td className="py-1.5 font-bold max-w-[130px] truncate">{item.product_name}</td>
+                      <td className="py-1.5 text-center font-mono">{item.quantity}</td>
+                      <td className="py-1.5 text-right font-mono">{item.unit_price.toLocaleString()}</td>
+                      <td className="py-1.5 text-right font-mono font-black">{item.total_price.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -333,54 +329,54 @@ Thank you for your business! 🍷`;
             </div>
 
             {/* Totals Calculation */}
-            <div className="py-2.5 border-b border-dashed border-stone-400 space-y-1.5 text-xs">
-              <div className="flex justify-between text-stone-600">
+            <div className="py-2.5 border-b-2 border-dashed border-black space-y-1.5 text-xs font-bold text-black">
+              <div className="print-subtotal flex justify-between text-black">
                 <span>Items Count:</span>
-                <span>{totalItemsCount} units</span>
+                <span className="font-mono">{totalItemsCount} units</span>
               </div>
-              <div className="flex justify-between text-sm font-extrabold pt-1 border-t border-stone-200">
+              <div className="print-total-row flex justify-between text-base font-black pt-1 border-t-2 border-dashed border-black text-black">
                 <span>TOTAL BILL:</span>
-                <span>KES {sale.total_amount.toLocaleString()}</span>
+                <span className="font-mono">KES {sale.total_amount.toLocaleString()}</span>
               </div>
 
               {/* Amount paid vs Debt breakdown */}
               {sale.amount_paid !== undefined && (
-                <div className="flex justify-between text-stone-700 pt-0.5 text-[11px]">
+                <div className="print-subtotal flex justify-between text-black pt-0.5 text-xs">
                   <span>Amount Paid Now:</span>
-                  <span className="font-bold text-emerald-700">
+                  <span className="font-bold font-mono text-black">
                     KES {sale.amount_paid.toLocaleString()}
                   </span>
                 </div>
               )}
 
               {sale.debt_amount !== undefined && sale.debt_amount > 0 && (
-                <div className="flex justify-between text-rose-700 font-bold pt-0.5 text-[11px] bg-rose-50 px-1.5 py-0.5 rounded">
+                <div className="print-subtotal flex justify-between text-black font-black pt-0.5 text-xs bg-stone-100 px-1.5 py-0.5 rounded">
                   <span>Balance Added to Debt:</span>
-                  <span>KES {sale.debt_amount.toLocaleString()}</span>
+                  <span className="font-mono">KES {sale.debt_amount.toLocaleString()}</span>
                 </div>
               )}
 
               {sale.payment_method === 'CASH' && sale.cash_tendered !== undefined && (
                 <>
-                  <div className="flex justify-between text-stone-600 pt-1 text-[11px]">
+                  <div className="print-subtotal flex justify-between text-black pt-1 text-xs">
                     <span>Cash Tendered:</span>
-                    <span>KES {sale.cash_tendered.toLocaleString()}</span>
+                    <span className="font-mono">KES {sale.cash_tendered.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between font-bold text-stone-900 text-[11px]">
+                  <div className="print-subtotal flex justify-between font-black text-black text-xs">
                     <span>Change Due:</span>
-                    <span>KES {(sale.change_given ?? 0).toLocaleString()}</span>
+                    <span className="font-mono">KES {(sale.change_given ?? 0).toLocaleString()}</span>
                   </div>
                 </>
               )}
             </div>
 
             {/* Tax breakdown note */}
-            <div className="pt-2 text-[10px] text-stone-500 text-center">
+            <div className="pt-2 text-[11px] font-bold text-black text-center">
               16% VAT Inclusive where applicable • ETR Verified
             </div>
 
             {/* Custom Footer */}
-            <div className="mt-3 pt-2 text-[10px] text-center text-stone-600 italic whitespace-pre-line border-t border-dotted border-stone-300">
+            <div className="mt-3 pt-2 text-[11px] font-bold text-center text-black italic whitespace-pre-line border-t-2 border-dotted border-black">
               {storeConfig.receipt_footer || 'Thank you for your business! Karibu tena.'}
             </div>
 

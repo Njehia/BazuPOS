@@ -6,7 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
-  Code2,
+  History,
   Key,
   LogOut,
   Package,
@@ -34,6 +34,7 @@ import {
 import { LocalDb } from '../lib/storage';
 import { BazuLogo } from './BazuLogo';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HomeMenuScreenProps {
   currentUser: User;
@@ -45,11 +46,11 @@ interface HomeMenuScreenProps {
       | 'inventory'
       | 'customers'
       | 'summary'
+      | 'transactions'
       | 'categories'
       | 'receipts'
       | 'users'
       | 'store'
-      | 'flutter_code'
   ) => void;
   onOpenChangePassword: () => void;
   onLogout: () => void;
@@ -114,6 +115,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
       lowStockCount: lowStockProducts.length,
       debtCustomersCount: customersWithDebt.length,
       totalDebtAmount,
+      totalSalesCount: sales.length,
     };
   }, []);
 
@@ -149,25 +151,25 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
   const isAdminOrManager = currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER';
 
   return (
-    <div className="min-h-screen w-full bg-[#0F172A] text-slate-100 flex flex-col select-none overflow-y-auto">
+    <div className="min-h-screen w-full bg-slate-50 dark:bg-[#0F172A] text-slate-800 dark:text-slate-100 flex flex-col select-none overflow-y-auto transition-colors duration-200">
       {/* Top Main Navigation Bar */}
-      <header className="h-16 sm:h-20 bg-[#1E1B4B] border-b border-indigo-950/60 px-4 sm:px-8 flex items-center justify-between shrink-0 shadow-lg sticky top-0 z-30">
+      <header className="h-16 sm:h-20 bg-white dark:bg-[#1E1B4B] border-b border-slate-200 dark:border-indigo-950/60 px-4 sm:px-8 flex items-center justify-between shrink-0 shadow-sm dark:shadow-lg sticky top-0 z-30 transition-colors duration-200">
         {/* Brand & Store Details */}
         <div className="flex items-center gap-3 sm:gap-4">
           <BazuLogo className="w-10 h-10 sm:w-11 sm:h-11 shrink-0 shadow-md ring-2 ring-amber-500/30 rounded-xl" />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-black text-white tracking-wide uppercase">
+              <h1 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-wide uppercase">
                 {storeConfig.store_name}
               </h1>
-              <span className="hidden md:inline-flex text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <span className="hidden md:inline-flex text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-500/30">
                 {storeConfig.branch}
               </span>
             </div>
-            <p className="text-xs text-slate-300 flex items-center gap-2">
+            <p className="text-xs text-slate-500 dark:text-slate-300 flex items-center gap-2">
               <span>Terminal {storeConfig.till_number}</span>
-              <span className="hidden sm:inline text-slate-500">•</span>
-              <span className="hidden sm:inline text-amber-400 font-mono">
+              <span className="hidden sm:inline text-slate-400 dark:text-slate-500">•</span>
+              <span className="hidden sm:inline text-amber-600 dark:text-amber-400 font-mono">
                 {currentDateFormatted}
               </span>
             </p>
@@ -176,17 +178,20 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
 
         {/* Right Header Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Theme Mode Toggle */}
+          <ThemeToggle />
+
           {/* Android PWA Install */}
           <PWAInstallButton />
 
           {/* User Profile Pill */}
-          <div className="flex items-center gap-2.5 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl">
+          <div className="flex items-center gap-2.5 bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-1.5 rounded-xl">
             <div className="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-xs">
               {userInitials}
             </div>
             <div className="hidden sm:block text-left">
-              <p className="text-xs font-bold text-white leading-none">{currentUser.name}</p>
-              <p className="text-[10px] text-amber-300 font-semibold tracking-wide uppercase mt-0.5">
+              <p className="text-xs font-bold text-slate-900 dark:text-white leading-none">{currentUser.name}</p>
+              <p className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold tracking-wide uppercase mt-0.5">
                 {getRoleLabel(currentUser.role)}
               </p>
             </div>
@@ -196,10 +201,10 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           <button
             type="button"
             onClick={onOpenChangePassword}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
+            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white border border-slate-200 dark:border-white/10 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
             title="Change Login PIN"
           >
-            <Key className="w-3.5 h-3.5 text-amber-400" />
+            <Key className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
             <span className="hidden md:inline">Change PIN</span>
           </button>
 
@@ -207,10 +212,10 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           <button
             type="button"
             onClick={onLogout}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 border border-red-500/30 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 border border-red-500/30 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
             title="Sign out of current shift"
           >
-            <LogOut className="w-3.5 h-3.5 text-red-400" />
+            <LogOut className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
             <span className="hidden md:inline">Sign Out</span>
           </button>
         </div>
@@ -286,60 +291,60 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           {/* Today's Sales */}
           <div
             onClick={() => onNavigate('summary')}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Today&apos;s Takings</span>
-              <TrendingUp className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform" />
             </div>
-            <p className="text-lg sm:text-2xl font-black text-white font-mono mt-1">
+            <p className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
               KES {stats.todaySalesTotal.toLocaleString()}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
-              <span className="text-emerald-400 font-bold">{stats.todaySalesCount}</span> orders completed
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">{stats.todaySalesCount}</span> orders completed
             </p>
           </div>
 
           {/* Cash vs M-Pesa */}
           <div
             onClick={() => onNavigate('summary')}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Cash &amp; M-Pesa Split</span>
-              <Smartphone className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+              <Smartphone className="w-4 h-4 text-blue-500 dark:text-blue-400 group-hover:scale-110 transition-transform" />
             </div>
             <div className="mt-1 space-y-0.5">
               <div className="flex justify-between text-xs">
-                <span className="text-slate-400">M-Pesa:</span>
-                <span className="font-mono font-bold text-white">KES {stats.todayMpesaTotal.toLocaleString()}</span>
+                <span className="text-slate-500 dark:text-slate-400">M-Pesa:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">KES {stats.todayMpesaTotal.toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Cash:</span>
-                <span className="font-mono font-bold text-white">KES {stats.todayCashTotal.toLocaleString()}</span>
+                <span className="text-slate-500 dark:text-slate-400">Cash:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">KES {stats.todayCashTotal.toLocaleString()}</span>
               </div>
             </div>
-            <p className="text-[10px] text-slate-500 mt-1">Click to view shift audit</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Click to view shift audit</p>
           </div>
 
           {/* Low Stock Warning */}
           <div
             onClick={() => onNavigate('inventory')}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Stock Alerts</span>
-              <Package className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+              <Package className="w-4 h-4 text-amber-500 dark:text-amber-400 group-hover:scale-110 transition-transform" />
             </div>
-            <p className="text-lg sm:text-2xl font-black text-white font-mono mt-1 flex items-center gap-2">
+            <p className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white font-mono mt-1 flex items-center gap-2">
               <span>{stats.lowStockCount}</span>
               {stats.lowStockCount > 0 && (
-                <span className="text-xs font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
+                <span className="text-xs font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
                   Needs Restock
                 </span>
               )}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
               Out of {stats.totalProducts} registered products
             </p>
           </div>
@@ -347,16 +352,16 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           {/* Outstanding Debts */}
           <div
             onClick={() => onNavigate('customers')}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Customer Debts</span>
-              <Users className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+              <Users className="w-4 h-4 text-amber-500 dark:text-amber-400 group-hover:scale-110 transition-transform" />
             </div>
-            <p className="text-lg sm:text-2xl font-black text-amber-400 font-mono mt-1">
+            <p className="text-lg sm:text-2xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
               KES {stats.totalDebtAmount.toLocaleString()}
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
               {stats.debtCustomersCount} customers owe balance
             </p>
           </div>
@@ -364,10 +369,10 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
 
         {/* Section Heading */}
         <div className="pt-2">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
             System Modules &amp; Actions
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Click any module below to jump directly into that workspace.
           </p>
         </div>
@@ -382,26 +387,26 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('pos');
             }}
-            className="bg-gradient-to-b from-slate-900 to-indigo-950/40 hover:to-indigo-950 border-2 border-amber-500/40 hover:border-amber-400 p-5 rounded-2xl transition-all cursor-pointer group shadow-lg hover:shadow-amber-500/10 relative overflow-hidden"
+            className="bg-amber-500/5 dark:bg-gradient-to-b dark:from-slate-900 dark:to-indigo-950/40 hover:bg-amber-500/10 dark:hover:to-indigo-950 border-2 border-amber-500/50 hover:border-amber-500 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-amber-500/10 relative overflow-hidden"
           >
             <div className="w-12 h-12 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center mb-4 shadow-md group-hover:scale-105 transition-transform">
               <ShoppingCart className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-amber-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
                 Make a Sale (POS Register)
               </h4>
-              <ArrowRight className="w-4 h-4 text-amber-400 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="w-4 h-4 text-amber-600 dark:text-amber-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               Launch the point-of-sale checkout terminal, barcode scanner, bottle catalog, and
               instant Cash &amp; M-Pesa payments.
             </p>
-            <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-[11px]">
-              <span className="text-emerald-400 font-bold flex items-center gap-1">
+            <div className="mt-4 pt-3 border-t border-amber-500/20 dark:border-white/10 flex items-center justify-between text-[11px]">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Ready for checkout
               </span>
-              <span className="font-mono text-slate-400">{stats.totalProducts} items in stock</span>
+              <span className="font-mono text-slate-500 dark:text-slate-400">{stats.totalProducts} items in stock</span>
             </div>
           </div>
 
@@ -413,23 +418,23 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('inventory');
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
-            <div className="w-12 h-12 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Package className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-blue-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                 Inventory &amp; Stock
               </h4>
               <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               Monitor live stock levels, add new liquor bottles, update cost &amp; retail prices,
               record incoming stock, and print barcodes.
             </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-amber-400 font-medium">
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-amber-600 dark:text-amber-400 font-medium">
                 {stats.lowStockCount > 0 ? `${stats.lowStockCount} Low stock alerts` : 'Stock is healthy'}
               </span>
               <span className="font-mono text-slate-400">{stats.totalProducts} Products</span>
@@ -444,26 +449,26 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('customers');
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
-            <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Users className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-amber-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
                 Customers &amp; Debts
               </h4>
               <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               Customer accounts ledger, track credit sales, record debt repayments, and send
               instant WhatsApp statement reminders.
             </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-amber-400 font-bold font-mono">
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
                 KES {stats.totalDebtAmount.toLocaleString()} Debt
               </span>
-              <span className="text-slate-400">{stats.debtCustomersCount} Accounts</span>
+              <span className="text-slate-500 dark:text-slate-400">{stats.debtCustomersCount} Accounts</span>
             </div>
           </div>
 
@@ -475,26 +480,55 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('summary');
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
-            <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <TrendingUp className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-emerald-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                 Sales Reports &amp; Summary
               </h4>
               <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               View daily gross sales, profit margins, cashier performance audits, top-selling
               liquor bottles, and hourly revenue curves.
             </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-emerald-400 font-bold">
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">
                 {stats.todaySalesCount} Today
               </span>
-              <span className="font-mono text-slate-400">KES {stats.todaySalesTotal.toLocaleString()}</span>
+              <span className="font-mono text-slate-500 dark:text-slate-400">KES {stats.todaySalesTotal.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {/* 5. Recent Transactions Journal & Audit */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('transactions')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('transactions');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+          >
+            <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <History className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                Recent Transactions
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Scrollable ledger of sales, exact timestamps, cash &amp; M-Pesa totals, cashier names,
+              itemized lines, and reprint receipt slips.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-amber-600 dark:text-amber-400 font-medium">Scrollable Journal</span>
+              <span className="font-mono text-slate-500 dark:text-slate-400">{stats.totalSalesCount} Transactions</span>
             </div>
           </div>
 
@@ -506,24 +540,24 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('categories');
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
-            <div className="w-12 h-12 rounded-xl bg-teal-500/20 border border-teal-500/30 text-teal-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-600 dark:text-teal-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Tags className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-teal-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
                 Product Categories
               </h4>
               <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               Manage category taxonomy: Whisky, Vodka, Gin, Beers, Wines, Spirits, Cigarettes,
               and Soft Drinks.
             </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-teal-400 font-medium">Categorized Shelf</span>
-              <span className="font-mono text-slate-400">{stats.categoriesCount} Categories</span>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-teal-600 dark:text-teal-400 font-medium">Categorized Shelf</span>
+              <span className="font-mono text-slate-500 dark:text-slate-400">{stats.categoriesCount} Categories</span>
             </div>
           </div>
 
@@ -535,24 +569,24 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('receipts');
             }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
-            <div className="w-12 h-12 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Printer className="w-6 h-6" />
             </div>
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-purple-400 transition-colors">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
                 Search &amp; Print Receipts
               </h4>
               <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
             </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
               Look up past transaction slips by slip number or date, verify items sold, and print
               80mm or 58mm thermal receipts.
             </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-purple-400 font-medium">Thermal 80mm/58mm</span>
-              <span className="text-slate-400">Slip History</span>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-purple-600 dark:text-purple-400 font-medium">Thermal 80mm/58mm</span>
+              <span className="text-slate-500 dark:text-slate-400">Slip History</span>
             </div>
           </div>
 
@@ -565,24 +599,24 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') onNavigate('users');
               }}
-              className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
             >
-              <div className="w-12 h-12 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <div className="w-12 h-12 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
                 <ShieldCheck className="w-6 h-6" />
               </div>
               <div className="flex items-center justify-between">
-                <h4 className="text-base font-bold text-white group-hover:text-rose-400 transition-colors">
+                <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
                   Staff &amp; Cashiers
                 </h4>
                 <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
               </div>
-              <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
                 Add cashiers and managers, assign 4-digit security PINs, and manage shift access
                 privileges.
               </p>
-              <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-                <span className="text-rose-400 font-medium">Access Control</span>
-                <span className="font-mono text-slate-400">{stats.usersCount} Staff Users</span>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                <span className="text-rose-600 dark:text-rose-400 font-medium">Access Control</span>
+                <span className="font-mono text-slate-500 dark:text-slate-400">{stats.usersCount} Staff Users</span>
               </div>
             </div>
           )}
@@ -596,61 +630,32 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') onNavigate('store');
               }}
-              className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
+              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
             >
-              <div className="w-12 h-12 rounded-xl bg-slate-700/40 border border-slate-600 text-slate-300 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
                 <Store className="w-6 h-6" />
               </div>
               <div className="flex items-center justify-between">
-                <h4 className="text-base font-bold text-white group-hover:text-amber-400 transition-colors">
+                <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
                   Store Setup &amp; Settings
                 </h4>
                 <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
               </div>
-              <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
                 Configure store legal name, M-Pesa Buy Goods Till / Paybill number, VAT PIN, receipt
                 footer message, and currency.
               </p>
-              <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-                <span className="text-slate-300 font-mono">Till: {storeConfig.till_number}</span>
-                <span className="text-slate-400">Settings</span>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                <span className="text-slate-700 dark:text-slate-300 font-mono">Till: {storeConfig.till_number}</span>
+                <span className="text-slate-500 dark:text-slate-400">Settings</span>
               </div>
             </div>
           )}
-
-          {/* 9. Flutter Source Code Inspection */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => onNavigate('flutter_code')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') onNavigate('flutter_code');
-            }}
-            className="bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-md hover:shadow-xl"
-          >
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-              <Code2 className="w-6 h-6" />
-            </div>
-            <div className="flex items-center justify-between">
-              <h4 className="text-base font-bold text-white group-hover:text-indigo-400 transition-colors">
-                Flutter Mobile Source
-              </h4>
-              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-            </div>
-            <p className="text-xs text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
-              Review mobile project architecture, pubspec.yaml dependencies, DatabaseHelper.dart,
-              and cross-platform synchronization files.
-            </p>
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px]">
-              <span className="text-indigo-400 font-medium">Native Android / iOS</span>
-              <span className="text-slate-400">Code Export</span>
-            </div>
-          </div>
         </div>
       </main>
 
       {/* Footer Info */}
-      <footer className="py-4 border-t border-indigo-950/60 text-center text-xs text-slate-400 shrink-0">
+      <footer className="py-4 border-t border-slate-200 dark:border-indigo-950/60 text-center text-xs text-slate-500 dark:text-slate-400 shrink-0 bg-white/50 dark:bg-transparent">
         <p>
           {storeConfig.store_name} • BazuPOS Retail &amp; Wholesale • Operating on Terminal{' '}
           {storeConfig.till_number}

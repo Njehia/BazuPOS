@@ -9,6 +9,8 @@ import {
   DollarSign,
   Edit2,
   ExternalLink,
+  FileSpreadsheet,
+  FileText,
   Filter,
   History,
   MessageSquare,
@@ -27,6 +29,8 @@ import {
   UserPlus,
   Users,
   X,
+  Home,
+  ArrowLeft,
 } from 'lucide-react';
 import { Customer, CustomerPayment, CustomerSummary, Sale, StoreConfig, User as UserModel } from '../types';
 import { LocalDb } from '../lib/storage';
@@ -34,20 +38,26 @@ import { WhatsAppModal } from './WhatsAppModal';
 import { CustomerPaymentModal } from './CustomerPaymentModal';
 import { CustomerFormModal } from './CustomerFormModal';
 import { ReceiptModal } from './ReceiptModal';
+import { exportCustomersExcel, exportCustomersPDF } from '../lib/exportUtils';
 
 interface CustomersSheetProps {
-  currentUser: UserModel;
-  storeConfig: StoreConfig;
-  onClose: () => void;
+  currentUser?: UserModel;
+  storeConfig?: StoreConfig;
+  onClose?: () => void;
+  onGoHome?: () => void;
+  onGoToPos?: () => void;
   onSelectCustomerForSale?: (customer: Customer) => void;
 }
 
 export const CustomersSheet: React.FC<CustomersSheetProps> = ({
   currentUser,
-  storeConfig,
+  storeConfig: propStoreConfig,
   onClose,
+  onGoHome,
+  onGoToPos,
   onSelectCustomerForSale,
 }) => {
+  const storeConfig = propStoreConfig || LocalDb.getStoreConfig();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'debt' | 'cleared'>('all');
   const [sortBy, setSortBy] = useState<'debt' | 'spent' | 'name' | 'recent'>('debt');
@@ -171,7 +181,55 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
+            {onGoHome && (
+              <button
+                type="button"
+                onClick={onGoHome}
+                className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                title="Return to Home Menu"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Home</span>
+              </button>
+            )}
+
+            {onGoToPos && (
+              <button
+                type="button"
+                onClick={onGoToPos}
+                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                title="Go to POS Register"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Back to POS</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => exportCustomersPDF(customerSummaries, storeConfig)}
+              disabled={customerSummaries.length === 0}
+              className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 hover:text-rose-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              title="Export Customers & Balances to formatted PDF report"
+            >
+              <FileText className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden md:inline">Export PDF</span>
+              <span className="md:hidden">PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => exportCustomersExcel(customerSummaries, storeConfig)}
+              disabled={customerSummaries.length === 0}
+              className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 hover:text-emerald-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              title="Export Customers list to Excel spreadsheet (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden md:inline">Export Excel</span>
+              <span className="md:hidden">Excel</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsAddCustomerOpen(true)}
@@ -183,7 +241,7 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={onClose || onGoHome}
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
               title="Close sheet"
             >

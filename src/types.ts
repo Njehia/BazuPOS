@@ -83,6 +83,8 @@ export interface Customer {
   email?: string;
   notes?: string;
   created_at: string; // ISO string
+  blacklisted?: boolean;
+  blacklist_reason?: string;
 }
 
 export interface CustomerPayment {
@@ -105,6 +107,39 @@ export interface CustomerSummary {
   salesCount: number;
   lastPurchaseDate?: string;
   hasDebt: boolean;
+  isBlacklisted?: boolean;
+}
+
+export type RequisitionStatus = 'PENDING' | 'APPROVED' | 'ORDERED' | 'RECEIVED' | 'REJECTED';
+export type RequisitionUrgency = 'NORMAL' | 'HIGH' | 'CRITICAL';
+
+export interface RequisitionItem {
+  id: string | number;
+  product_id: number;
+  product_name: string;
+  current_stock: number;
+  requested_qty: number;
+  unit: string;
+  estimated_cost?: number;
+  notes?: string;
+}
+
+export interface Requisition {
+  id: string;
+  requisition_no: string;
+  requested_by_name: string;
+  requested_by_id?: number;
+  requested_by_role: UserRole;
+  created_at: string;
+  status: RequisitionStatus;
+  urgency: RequisitionUrgency;
+  items: RequisitionItem[];
+  total_items: number;
+  total_units: number;
+  total_estimated_cost: number;
+  notes?: string;
+  admin_notes?: string;
+  updated_at?: string;
 }
 
 export interface Sale {
@@ -143,7 +178,8 @@ export interface StoreConfig {
   phone_number: string;
   till_number: string;
   receipt_footer: string;
-  primary_color: string; // 'amber' | 'emerald' | 'indigo' | 'rose'
+  primary_color: string; // 'amber' | 'emerald' | 'indigo' | 'rose' | 'blue' | 'teal' | 'purple' | 'slate' | 'custom'
+  primary_color_hex?: string; // Hex color override e.g. '#D97706'
   low_stock_threshold?: number; // Store-wide default low stock alert threshold (defaults to 10)
 }
 

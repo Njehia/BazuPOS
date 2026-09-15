@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Sale, SaleItem, StoreConfig } from '../types';
 import { LocalDb } from '../lib/storage';
+import { maskPhoneNumber } from '../lib/phoneUtils';
 
 interface PrintReceiptModuleProps {
   storeConfig: StoreConfig;
@@ -151,6 +152,9 @@ export const PrintReceiptModule: React.FC<PrintReceiptModuleProps> = ({
       `RECEIPT: RCP-${activeSale.id.toString().slice(-6)}`,
       `DATE: ${formattedDate}`,
       `CASHIER: ${activeSale.cashier_name}`,
+      activeSale.customer_name
+        ? `CUSTOMER: ${activeSale.customer_name}${activeSale.customer_phone ? ` (${maskPhoneNumber(activeSale.customer_phone)})` : ''}`
+        : '',
       `PAYMENT: ${activeSale.payment_method}${activeSale.mpesa_code ? ` (${activeSale.mpesa_code})` : ''}`,
       `STATUS: COMPLETED (DUPLICATE COPY)`,
       divider,
@@ -511,85 +515,101 @@ export const PrintReceiptModule: React.FC<PrintReceiptModuleProps> = ({
               {activeSale ? (
                 <div
                   id="thermal-receipt"
-                  style={{ maxWidth: paperWidth === '58mm' ? '250px' : '340px' }}
-                  className={`w-full bg-white text-slate-900 p-5 rounded-lg shadow-md font-mono text-xs border-t-8 border-amber-500 print:shadow-none print:m-0 transition-all ${
-                    paperWidth === '58mm' ? 'paper-58mm text-[11px]' : ''
+                  style={{
+                    maxWidth: paperWidth === '58mm' ? '260px' : '360px',
+                    borderTopColor: 'var(--theme-receipt-border, #d97706)',
+                  }}
+                  className={`w-full bg-white text-black p-5 rounded-lg shadow-md font-mono text-sm border-t-8 print:shadow-none print:m-0 transition-all font-bold ${
+                    paperWidth === '58mm' ? 'paper-58mm text-xs' : ''
                   }`}
                 >
                   {/* Duplicate / Reprint Notice */}
-                  <div className="mb-3 text-center pb-2 border-b border-dashed border-stone-300">
-                    <span className="inline-block uppercase tracking-widest text-[9px] font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+                  <div className="mb-3 text-center pb-2 border-b-2 border-dashed border-black">
+                    <span className="inline-block uppercase tracking-widest text-xs font-black px-2 py-0.5 rounded bg-stone-200 text-black border border-black">
                       REPRINT / DUPLICATE RECEIPT
                     </span>
                   </div>
 
                   {/* Store Branding */}
-                  <div className="text-center pb-3 border-b border-dashed border-stone-400">
-                    <div className="font-extrabold text-sm uppercase tracking-wide">
+                  <div className="text-center pb-3 border-b-2 border-dashed border-black">
+                    <div className="print-title font-black text-lg uppercase tracking-wide text-black">
                       {storeConfig.store_name}
                     </div>
-                    <div className="text-[11px] text-stone-600 font-sans font-medium">
+                    <div className="print-header-sub text-xs text-black font-bold mt-0.5">
                       {storeConfig.branch}
                     </div>
-                    <div className="text-[11px] text-stone-600">Tel: {storeConfig.phone_number}</div>
-                    <div className="text-[11px] font-bold text-emerald-800 mt-0.5">
+                    <div className="print-header-sub text-xs text-black font-bold">Tel: {storeConfig.phone_number}</div>
+                    <div className="print-header-sub text-xs font-black text-black mt-0.5">
                       M-PESA TILL: {storeConfig.till_number}
                     </div>
                   </div>
 
                   {/* Transaction Metadata */}
-                  <div className="py-2.5 border-b border-dashed border-stone-400 space-y-1 text-[11px]">
+                  <div className="print-meta py-2.5 border-b-2 border-dashed border-black space-y-1 text-xs font-bold text-black">
                     <div className="flex justify-between">
-                      <span className="text-stone-500">Receipt No:</span>
-                      <span className="font-bold">RCP-{activeSale.id.toString().slice(-6)}</span>
+                      <span>Receipt No:</span>
+                      <span className="font-bold font-mono">RCP-{activeSale.id.toString().slice(-6)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-stone-500">Date:</span>
-                      <span>{formattedDate}</span>
+                      <span>Date:</span>
+                      <span className="font-mono">{formattedDate}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-stone-500">Cashier:</span>
-                      <span>{activeSale.cashier_name}</span>
+                      <span>Cashier:</span>
+                      <span className="font-bold">{activeSale.cashier_name}</span>
                     </div>
+                    {activeSale.customer_name && (
+                      <div className="flex justify-between bg-stone-100 px-1.5 py-0.5 rounded text-black font-bold">
+                        <span>Client:</span>
+                        <span>
+                          {activeSale.customer_name}
+                          {activeSale.customer_phone ? ` (${maskPhoneNumber(activeSale.customer_phone)})` : ''}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
-                      <span className="text-stone-500">Payment:</span>
-                      <span className="font-bold text-stone-900">
-                        {activeSale.payment_method === 'MPESA' ? 'M-PESA BUY GOODS' : 'CASH'}
+                      <span>Payment:</span>
+                      <span className="font-black text-black">
+                        {activeSale.payment_method === 'MPESA'
+                          ? 'M-PESA BUY GOODS'
+                          : activeSale.payment_method === 'DEBT'
+                          ? 'CREDIT / DEBT'
+                          : 'CASH'}
                       </span>
                     </div>
                     {activeSale.mpesa_code && (
-                      <div className="flex justify-between text-emerald-800 font-bold">
-                        <span className="text-stone-500">M-Pesa Ref:</span>
+                      <div className="flex justify-between font-black text-black">
+                        <span>M-Pesa Ref:</span>
                         <span className="font-mono">{activeSale.mpesa_code}</span>
                       </div>
                     )}
                   </div>
 
                   {/* Items Table */}
-                  <div className="py-2.5 border-b border-dashed border-stone-400">
-                    <table className="w-full">
+                  <div className="py-2.5 border-b-2 border-dashed border-black">
+                    <table className="print-items-table w-full">
                       <thead>
-                        <tr className="text-stone-500 border-b border-stone-200 text-[10px]">
+                        <tr className="text-black border-b-2 border-black text-xs font-black uppercase">
                           <th className="text-left pb-1">ITEM</th>
                           <th className="text-center pb-1">QTY</th>
                           <th className="text-right pb-1">PRICE</th>
                           <th className="text-right pb-1">TOTAL</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-stone-100">
+                      <tbody className="divide-y divide-black/30">
                         {activeItems.map((item, idx) => (
                           <tr
                             key={`print-item-${item.id || item.product_id || idx}-${idx}`}
-                            className="text-[11px]"
+                            className="text-xs font-bold text-black"
                           >
-                            <td className="py-1.5 font-medium max-w-[120px] truncate">
+                            <td className="py-1.5 font-bold max-w-[130px] truncate">
                               {item.product_name}
                             </td>
-                            <td className="py-1.5 text-center">{item.quantity}</td>
+                            <td className="py-1.5 text-center font-mono">{item.quantity}</td>
                             <td className="py-1.5 text-right font-mono">
                               {item.unit_price.toLocaleString()}
                             </td>
-                            <td className="py-1.5 text-right font-mono font-bold">
+                            <td className="py-1.5 text-right font-mono font-black">
                               {item.total_price.toLocaleString()}
                             </td>
                           </tr>
@@ -599,38 +619,38 @@ export const PrintReceiptModule: React.FC<PrintReceiptModuleProps> = ({
                   </div>
 
                   {/* Totals Calculation */}
-                  <div className="py-2.5 border-b border-dashed border-stone-400 space-y-1.5 text-xs">
-                    <div className="flex justify-between text-stone-600">
+                  <div className="py-2.5 border-b-2 border-dashed border-black space-y-1.5 text-xs font-bold text-black">
+                    <div className="print-subtotal flex justify-between text-black">
                       <span>Items Count:</span>
-                      <span>{totalUnits} units</span>
+                      <span className="font-mono">{totalUnits} units</span>
                     </div>
-                    <div className="flex justify-between text-sm font-extrabold pt-1 border-t border-stone-200">
+                    <div className="print-total-row flex justify-between text-base font-black pt-1 border-t-2 border-dashed border-black text-black">
                       <span>TOTAL (KES):</span>
-                      <span>KES {activeSale.total_amount.toLocaleString()}</span>
+                      <span className="font-mono">KES {activeSale.total_amount.toLocaleString()}</span>
                     </div>
 
                     {activeSale.payment_method === 'CASH' &&
                       activeSale.cash_tendered !== undefined && (
                         <>
-                          <div className="flex justify-between text-stone-600 pt-1 text-[11px]">
+                          <div className="print-subtotal flex justify-between text-black pt-1 text-xs">
                             <span>Cash Tendered:</span>
-                            <span>KES {activeSale.cash_tendered.toLocaleString()}</span>
+                            <span className="font-mono">KES {activeSale.cash_tendered.toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between font-bold text-stone-900 text-[11px]">
+                          <div className="print-subtotal flex justify-between font-black text-black text-xs">
                             <span>Change Given:</span>
-                            <span>KES {(activeSale.change_given ?? 0).toLocaleString()}</span>
+                            <span className="font-mono">KES {(activeSale.change_given ?? 0).toLocaleString()}</span>
                           </div>
                         </>
                       )}
                   </div>
 
                   {/* Tax Note */}
-                  <div className="pt-2 text-[10px] text-stone-500 text-center">
+                  <div className="pt-2 text-[11px] font-bold text-black text-center">
                     16% VAT Inclusive where applicable • ETR Verified
                   </div>
 
                   {/* Custom Footer */}
-                  <div className="mt-3 pt-2 text-[10px] text-center text-stone-600 italic whitespace-pre-line border-t border-dotted border-stone-300">
+                  <div className="mt-3 pt-2 text-[11px] font-bold text-center text-black italic whitespace-pre-line border-t-2 border-dotted border-black">
                     {storeConfig.receipt_footer || 'Thank you for your business! Karibu tena.'}
                   </div>
 

@@ -11,6 +11,10 @@ import {
   StoreConfig,
   User,
   UserRole,
+  Requisition,
+  RequisitionItem,
+  RequisitionStatus,
+  RequisitionUrgency,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -25,13 +29,16 @@ import { CloudDb } from './firebase';
 
 const STORAGE_KEYS = {
   USERS: 'bazu_pos_users',
+  DELETED_USER_IDS: 'bazu_pos_deleted_user_ids',
   PRODUCTS: 'bazu_pos_products',
+  DELETED_PRODUCT_IDS: 'bazu_pos_deleted_product_ids',
   SALES: 'bazu_pos_sales',
   SALE_ITEMS: 'bazu_pos_sale_items',
   STORE_CONFIG: 'bazu_pos_store_config',
   CATEGORIES: 'bazu_pos_categories',
   CUSTOMERS: 'bazu_pos_customers',
   CUSTOMER_PAYMENTS: 'bazu_pos_customer_payments',
+  REQUISITIONS: 'bazu_pos_requisitions',
 };
 
 export class LocalDb {
@@ -68,8 +75,10 @@ export class LocalDb {
     try {
       // 1. Live Products Sync
       CloudDb.onProductsSnapshot((remoteProducts) => {
+        const deletedIds = LocalDb.getDeletedProductIds();
         if (remoteProducts && remoteProducts.length > 0) {
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(remoteProducts));
+          const filtered = remoteProducts.filter((p) => !deletedIds.has(Number(p.id)));
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filtered));
           this.notifyListeners();
         } else {
           // Cloud database empty: push initial catalog to Firestore
@@ -104,8 +113,10 @@ export class LocalDb {
 
       // 4. Live Staff Users Sync
       CloudDb.onUsersSnapshot((remoteUsers) => {
+        const deletedIds = LocalDb.getDeletedUserIds();
         if (remoteUsers && remoteUsers.length > 0) {
-          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(remoteUsers));
+          const filtered = remoteUsers.filter((u) => !deletedIds.has(Number(u.id)));
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
           this.notifyListeners();
         } else {
           // Seed cloud with initial staff
@@ -159,32 +170,61 @@ export class LocalDb {
           CloudDb.batchSetCustomerPayments(this.getCustomerPayments());
         }
       });
+
+      // 9. Live Requisitions Sync
+      CloudDb.onRequisitionsSnapshot((remoteRequisitions) => {
+        if (remoteRequisitions && remoteRequisitions.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(remoteRequisitions));
+          this.notifyListeners();
+        }
+      });
     } catch (err) {
       console.warn('initLiveSync error:', err);
     }
   }
 
   // ==========================================
+  // DELETED USERS PERSISTENCE SAFEGUARD
+  // ==========================================
+  static getDeletedUserIds(): Set<number> {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.DELETED_USER_IDS);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr.map(Number) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  static addDeletedUserId(id: number): void {
+    const set = this.getDeletedUserIds();
+    set.add(Number(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_USER_IDS, JSON.stringify(Array.from(set)));
+  }
+
+  static removeDeletedUserId(id: number): void {
+    const set = this.getDeletedUserIds();
+    set.delete(Number(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_USER_IDS, JSON.stringify(Array.from(set)));
+  }
+
+  // ==========================================
   // USERS & AUTHENTICATION (USERNAME & PASSWORD)
   // ==========================================
   static getUsers(): User[] {
+    const deletedIds = this.getDeletedUserIds();
     const raw = localStorage.getItem(STORAGE_KEYS.USERS);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-      return INITIAL_USERS;
+      const initial = INITIAL_USERS.filter((u) => !deletedIds.has(u.id));
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initial));
+      return initial;
     }
     try {
       const parsed: User[] = JSON.parse(raw);
-      let list = Array.isArray(parsed) ? [...parsed] : [];
-
-      // Ensure seed has at least the sample roles if older store lacked them
-      if (list.length > 0 && !list.some((u) => u.role === 'SUPERVISOR')) {
-        for (const init of INITIAL_USERS) {
-          if (!list.some((u) => u.pin === init.pin)) {
-            list.push(init);
-          }
-        }
-      }
+      let list = Array.isArray(parsed)
+        ? parsed.filter((u) => !deletedIds.has(Number(u.id)))
+        : [];
 
       // Guarantee unique IDs, usernames, and status
       const seenIds = new Set<number>();
@@ -199,6 +239,7 @@ export class LocalDb {
       let hasMutated = false;
 
       for (const u of list) {
+        if (deletedIds.has(Number(u.id))) continue;
         const isSuspended = !!u.suspended || u.status === 'SUSPENDED';
         const fallbackUsername = u.username || u.name.toLowerCase().split(' ')[0].replace(/[^a-z0-9]/g, '');
         const user: User = {
@@ -223,10 +264,11 @@ export class LocalDb {
       if (hasMutated || deduplicated.length !== parsed.length) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(deduplicated));
       }
-      return deduplicated.length > 0 ? deduplicated : INITIAL_USERS;
+      return deduplicated;
     } catch {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-      return INITIAL_USERS;
+      const initial = INITIAL_USERS.filter((u) => !deletedIds.has(u.id));
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initial));
+      return initial;
     }
   }
 
@@ -475,7 +517,9 @@ export class LocalDb {
     }
 
     const filtered = users.filter((u) => u.id !== id);
+    this.addDeletedUserId(id);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
+    CloudDb.deleteUser(id);
     this.notifyListeners();
     return { success: true };
   }
@@ -742,19 +786,42 @@ export class LocalDb {
   // ==========================================
   // PRODUCTS & INVENTORY
   // ==========================================
+  static getDeletedProductIds(): Set<number> {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.DELETED_PRODUCT_IDS);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr.map(Number) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  static addDeletedProductId(id: number): void {
+    const set = this.getDeletedProductIds();
+    set.add(Number(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_PRODUCT_IDS, JSON.stringify(Array.from(set)));
+  }
+
   static getProducts(): Product[] {
+    const deletedIds = this.getDeletedProductIds();
     const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
-      return INITIAL_PRODUCTS;
+      const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initial));
+      return initial;
     }
     try {
       const parsed: Product[] = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return INITIAL_PRODUCTS;
+      if (!Array.isArray(parsed)) {
+        const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
+        return initial;
+      }
 
+      const list = parsed.filter((p) => !deletedIds.has(Number(p.id)));
       const seenIds = new Set<number>();
       let maxId = 0;
-      for (const p of parsed) {
+      for (const p of list) {
         if (typeof p.id === 'number' && !isNaN(p.id)) {
           maxId = Math.max(maxId, p.id);
         }
@@ -763,7 +830,8 @@ export class LocalDb {
       const deduplicated: Product[] = [];
       let hasMutated = false;
 
-      for (const p of parsed) {
+      for (const p of list) {
+        if (deletedIds.has(Number(p.id))) continue;
         const prod = { ...p };
         if (!prod.id || seenIds.has(prod.id)) {
           hasMutated = true;
@@ -774,13 +842,14 @@ export class LocalDb {
         deduplicated.push(prod);
       }
 
-      if (hasMutated) {
+      if (hasMutated || deduplicated.length !== parsed.length) {
         localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(deduplicated));
       }
-      return deduplicated.length > 0 ? deduplicated : INITIAL_PRODUCTS;
+      return deduplicated;
     } catch {
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
-      return INITIAL_PRODUCTS;
+      const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initial));
+      return initial;
     }
   }
 
@@ -802,6 +871,14 @@ export class LocalDb {
     const existing = products.find((p) => p.id === id);
     if (!existing) {
       return { success: false, error: 'Product not found.' };
+    }
+
+    if (updates.barcode) {
+      const cleanBarcode = updates.barcode.trim();
+      if (products.some((p) => p.id !== id && p.barcode === cleanBarcode)) {
+        return { success: false, error: `Barcode "${cleanBarcode}" is already assigned to another product.` };
+      }
+      updates.barcode = cleanBarcode;
     }
 
     const updatedProducts = products.map((p) => {
@@ -884,16 +961,18 @@ export class LocalDb {
     id: number,
     userRole?: UserRole
   ): { success: boolean; products: Product[]; error?: string } {
-    if (userRole && userRole !== 'ADMIN') {
+    if (userRole && userRole !== 'ADMIN' && userRole !== 'MANAGER') {
       return {
         success: false,
         products: this.getProducts(),
-        error: 'Permission Denied: Only Administrator can delete products from inventory.',
+        error: 'Permission Denied: Only Administrator or Manager can delete products from inventory.',
       };
     }
 
+    this.addDeletedProductId(id);
     const products = this.getProducts().filter((p) => p.id !== id);
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+    CloudDb.deleteProduct(id);
     this.notifyListeners();
     return { success: true, products };
   }
@@ -952,19 +1031,21 @@ export class LocalDb {
     return { sale, items };
   }
 
-  static getAvailableSalesDates(): { date: string; count: number; total: number }[] {
+  static getAvailableSalesDates(): { date: string; count: number; total: number; totalRevenue: number }[] {
     const sales = this.getSales();
     const dateMap = new Map<string, { count: number; total: number }>();
     for (const s of sales) {
-      const day = s.created_at.slice(0, 10);
+      if (!s || !s.created_at) continue;
+      const day = String(s.created_at).slice(0, 10);
+      if (!day || day.length < 10) continue;
       const current = dateMap.get(day) || { count: 0, total: 0 };
       dateMap.set(day, {
         count: current.count + 1,
-        total: current.total + s.total_amount,
+        total: current.total + (Number(s.total_amount) || 0),
       });
     }
     return Array.from(dateMap.entries())
-      .map(([date, data]) => ({ date, ...data }))
+      .map(([date, data]) => ({ date, count: data.count, total: data.total, totalRevenue: data.total }))
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
@@ -1083,19 +1164,19 @@ export class LocalDb {
 
     const selectedSales = isAllTime
       ? sales
-      : sales.filter((s) => s.created_at.slice(0, 10) === queryDate);
+      : sales.filter((s) => s && s.created_at && String(s.created_at).slice(0, 10) === queryDate);
 
     const cashTotal = selectedSales
-      .filter((s) => s.payment_method === 'CASH')
-      .reduce((sum, s) => sum + s.total_amount, 0);
+      .filter((s) => s && s.payment_method === 'CASH')
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
 
     const mpesaTotal = selectedSales
-      .filter((s) => s.payment_method === 'MPESA')
-      .reduce((sum, s) => sum + s.total_amount, 0);
+      .filter((s) => s && s.payment_method === 'MPESA')
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
 
     const grandTotal = cashTotal + mpesaTotal;
     const totalTransactions = selectedSales.length;
-    const totalItems = selectedSales.reduce((sum, s) => sum + s.items_count, 0);
+    const totalItems = selectedSales.reduce((sum, s) => sum + (Number(s.items_count) || 0), 0);
     const averageTicket = totalTransactions > 0 ? Math.round(grandTotal / totalTransactions) : 0;
 
     return {
@@ -1256,6 +1337,30 @@ export class LocalDb {
     return { success: true };
   }
 
+  static toggleCustomerBlacklist(
+    id: number,
+    reason?: string
+  ): { success: boolean; customer?: Customer; error?: string } {
+    const customers = this.getCustomers();
+    const existing = customers.find((c) => c.id === id);
+    if (!existing) {
+      return { success: false, error: 'Customer not found.' };
+    }
+
+    const updatedCustomer: Customer = {
+      ...existing,
+      blacklisted: !existing.blacklisted,
+      blacklist_reason: !existing.blacklisted ? (reason?.trim() || 'Credit purchases suspended') : undefined,
+    };
+
+    const updatedList = customers.map((c) => (c.id === id ? updatedCustomer : c));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(updatedList));
+    CloudDb.setCustomer(updatedCustomer);
+    this.notifyListeners();
+
+    return { success: true, customer: updatedCustomer };
+  }
+
   // ==========================================
   // CUSTOMER REPAYMENTS & DEBT SETTLEMENT
   // ==========================================
@@ -1361,6 +1466,7 @@ export class LocalDb {
       salesCount: sales.length,
       lastPurchaseDate: lastSale ? lastSale.created_at : undefined,
       hasDebt: outstandingDebt > 0,
+      isBlacklisted: !!customer.blacklisted,
     };
   }
 
@@ -1396,8 +1502,103 @@ export class LocalDb {
         salesCount: custSales.length,
         lastPurchaseDate: sortedSales[0] ? sortedSales[0].created_at : undefined,
         hasDebt: outstandingDebt > 0,
+        isBlacklisted: !!customer.blacklisted,
       };
     });
+  }
+
+  // ==========================================
+  // REQUISITIONS (RESTOCK ORDERS)
+  // ==========================================
+  static getRequisitions(): Requisition[] {
+    const raw = localStorage.getItem(STORAGE_KEYS.REQUISITIONS);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static addRequisition(
+    reqData: {
+      requested_by_name: string;
+      requested_by_id?: number;
+      requested_by_role: UserRole;
+      urgency: RequisitionUrgency;
+      items: RequisitionItem[];
+      notes?: string;
+    }
+  ): { success: boolean; requisition?: Requisition; error?: string } {
+    if (!reqData.items || reqData.items.length === 0) {
+      return { success: false, error: 'Requisition must include at least one item.' };
+    }
+
+    const currentRequisitions = this.getRequisitions();
+    const reqNo = `REQ-${new Date().getFullYear()}-${String(currentRequisitions.length + 1).padStart(3, '0')}`;
+    const totalUnits = reqData.items.reduce((sum, item) => sum + (item.requested_qty || 0), 0);
+    const totalCost = reqData.items.reduce(
+      (sum, item) => sum + ((item.estimated_cost || 0) * (item.requested_qty || 0)),
+      0
+    );
+
+    const newReq: Requisition = {
+      id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      requisition_no: reqNo,
+      requested_by_name: reqData.requested_by_name,
+      requested_by_id: reqData.requested_by_id,
+      requested_by_role: reqData.requested_by_role,
+      created_at: new Date().toISOString(),
+      status: 'PENDING',
+      urgency: reqData.urgency,
+      items: reqData.items,
+      total_items: reqData.items.length,
+      total_units: totalUnits,
+      total_estimated_cost: totalCost,
+      notes: reqData.notes?.trim() || undefined,
+    };
+
+    const updated = [newReq, ...currentRequisitions];
+    localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(updated));
+    CloudDb.setRequisition(newReq);
+    this.notifyListeners();
+    return { success: true, requisition: newReq };
+  }
+
+  static updateRequisitionStatus(
+    id: string,
+    status: RequisitionStatus,
+    adminNotes?: string
+  ): { success: boolean; requisition?: Requisition; error?: string } {
+    const list = this.getRequisitions();
+    const existing = list.find((r) => r.id === id);
+    if (!existing) {
+      return { success: false, error: 'Requisition not found.' };
+    }
+
+    const updatedReq: Requisition = {
+      ...existing,
+      status,
+      admin_notes: adminNotes !== undefined ? adminNotes : existing.admin_notes,
+      updated_at: new Date().toISOString(),
+    };
+
+    const updatedList = list.map((r) => (r.id === id ? updatedReq : r));
+    localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(updatedList));
+    CloudDb.setRequisition(updatedReq);
+    this.notifyListeners();
+    return { success: true, requisition: updatedReq };
+  }
+
+  static deleteRequisition(id: string): { success: boolean } {
+    const list = this.getRequisitions().filter((r) => r.id !== id);
+    localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(list));
+    CloudDb.deleteRequisition(id);
+    this.notifyListeners();
+    return { success: true };
   }
 
   static resetDatabase() {

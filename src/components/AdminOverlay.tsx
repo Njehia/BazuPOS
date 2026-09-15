@@ -16,6 +16,7 @@ import {
   Edit2,
   Eye,
   EyeOff,
+  FileSpreadsheet,
   FileText,
   Filter,
   History,
@@ -24,6 +25,7 @@ import {
   KeyRound,
   Lock,
   Package,
+  Palette,
   Plus,
   Printer,
   Receipt,
@@ -44,6 +46,7 @@ import {
   UserX,
   Users,
   X,
+  Camera,
 } from 'lucide-react';
 import {
   Category,
@@ -63,14 +66,20 @@ import { ChangePasswordModal } from './ChangePasswordModal';
 import { PrintReceiptModule } from './PrintReceiptModule';
 import { BazuLogo } from './BazuLogo';
 import { CustomersSheet } from './CustomersSheet';
+import { RecentTransactionsView } from './RecentTransactionsView';
+import { exportCustomersExcel, exportCustomersPDF, exportSalesReportExcel, exportSalesReportPDF, exportStockExcel, exportStockPDF } from '../lib/exportUtils';
+import { THEME_PRESETS_LIST, applyStoreTheme, getThemeDetails, useThemeMode } from '../lib/theme';
+import { ThemeToggle } from './ThemeToggle';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
-export type AdminTab = 'inventory' | 'categories' | 'summary' | 'customers' | 'users' | 'store';
+export type AdminTab = 'inventory' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
 interface AdminOverlayProps {
   currentUser: User;
   initialTab?: AdminTab;
   onClose: () => void;
   onGoHome?: () => void;
+  onGoToPos?: () => void;
   onInventoryChanged: () => void;
   onStoreConfigChanged: (config: StoreConfig) => void;
   onSelectCustomerForSale?: (customer: any) => void;
@@ -81,6 +90,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   initialTab,
   onClose,
   onGoHome,
+  onGoToPos,
   onInventoryChanged,
   onStoreConfigChanged,
   onSelectCustomerForSale,
@@ -91,10 +101,15 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   const [stockFilter, setStockFilter] = useState<'ALL' | 'BELOW_THRESHOLD' | 'OUT_OF_STOCK' | 'LOW_STOCK' | 'HEALTHY'>('ALL');
   const [selectedInventoryCategory, setSelectedInventoryCategory] = useState<string>('all');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [newProdNameInput, setNewProdNameInput] = useState<string>('');
+  const [newBarcodeEditInput, setNewBarcodeEditInput] = useState<string>('');
+  const [newCategoryEditInput, setNewCategoryEditInput] = useState<string>('');
   const [newStockInput, setNewStockInput] = useState<string>('');
   const [newPriceInput, setNewPriceInput] = useState<string>('');
   const [newThresholdInput, setNewThresholdInput] = useState<string>('');
   const [productFeedbackError, setProductFeedbackError] = useState<string | null>(null);
+  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
   // Reorder Replenishment Slip modal state
   const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
@@ -365,9 +380,20 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
     e.preventDefault();
     const updated = LocalDb.updateStoreConfig(storeConfig);
     setStoreConfig(updated);
+    applyStoreTheme(updated);
     onStoreConfigChanged(updated);
     setConfigSuccessMsg(true);
     setTimeout(() => setConfigSuccessMsg(false), 2500);
+  };
+
+  const handleSelectTheme = (themeId: string, customHex?: string) => {
+    const nextConfig: StoreConfig = {
+      ...storeConfig,
+      primary_color: themeId,
+      primary_color_hex: customHex !== undefined ? customHex : storeConfig.primary_color_hex,
+    };
+    setStoreConfig(nextConfig);
+    applyStoreTheme(nextConfig);
   };
 
   // Staff User Management Handlers
@@ -650,9 +676,9 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   });
 
   return (
-    <div className="fixed inset-0 z-40 bg-[#F8FAFC] text-slate-800 flex flex-col overflow-hidden animate-fade-in">
+    <div className="fixed inset-0 z-40 bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden animate-fade-in transition-colors duration-200">
       {/* Top Navbar */}
-      <header className="h-16 px-4 sm:px-6 bg-[#1E1B4B] text-white flex items-center justify-between shrink-0 shadow-sm">
+      <header className="h-16 px-4 sm:px-6 bg-[#1E1B4B] dark:bg-slate-900 border-b border-indigo-950/80 dark:border-slate-800 text-white flex items-center justify-between shrink-0 shadow-sm transition-colors duration-200">
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Home Page Button */}
           <button
@@ -695,6 +721,9 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
 
         {/* Right Header Utilities & Tab Switcher */}
         <div className="flex items-center gap-2">
+          {/* Global Theme Toggle */}
+          <ThemeToggle />
+
           <button
             type="button"
             onClick={() => setIsPrintReceiptModuleOpen(true)}
@@ -706,7 +735,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
           </button>
 
           {/* Tab Switcher */}
-          <div className="flex items-center gap-1 bg-indigo-950/80 p-1 rounded-xl border border-indigo-900 overflow-x-auto">
+          <div className="flex items-center gap-1 bg-indigo-950/80 dark:bg-slate-950/80 p-1 rounded-xl border border-indigo-900 dark:border-slate-800 overflow-x-auto">
             <button
               type="button"
               onClick={() => setActiveTab('inventory')}
@@ -732,6 +761,21 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               <span>Categories</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">
                 {categories.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('transactions')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'transactions'
+                  ? 'bg-amber-500 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>Recent Transactions</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">
+                {allSales.length}
               </span>
             </button>
             <button
@@ -790,7 +834,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
       </header>
 
       {/* Main Body */}
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#F8FAFC]">
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#F8FAFC] dark:bg-slate-950 transition-colors duration-200">
         {/* TAB 1: INVENTORY MANAGEMENT */}
         {activeTab === 'inventory' && (
           <div className="max-w-6xl mx-auto space-y-4">
@@ -965,6 +1009,28 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                       </option>
                     ))}
                   </select>
+
+                  <button
+                    type="button"
+                    onClick={() => exportStockPDF(filteredProducts, categories, storeConfig)}
+                    disabled={filteredProducts.length === 0}
+                    className="py-2.5 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-rose-700 border border-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                    title="Export inventory to formatted PDF catalog report"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Export PDF</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => exportStockExcel(filteredProducts, categories, storeConfig)}
+                    disabled={filteredProducts.length === 0}
+                    className="py-2.5 px-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-emerald-700 border border-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                    title="Export inventory stock sheet to Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Export Excel</span>
+                  </button>
 
                   {isAdmin ? (
                     <button
@@ -1543,6 +1609,16 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
           </div>
         )}
 
+        {/* TAB: RECENT TRANSACTIONS JOURNAL & AUDIT */}
+        {activeTab === 'transactions' && (
+          <RecentTransactionsView
+            currentUser={currentUser}
+            storeConfig={storeConfig}
+            onSelectCustomer={onSelectCustomerForSale}
+            onClose={onClose}
+          />
+        )}
+
         {/* TAB 3: SALES & REVENUE EXPLORER */}
         {activeTab === 'summary' && (
           <div className="max-w-6xl mx-auto space-y-5">
@@ -1652,6 +1728,44 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                     className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
                   >
                     <RefreshCw className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportSalesReportPDF(filteredSales, storeConfig, {
+                        title: 'PERIOD SALES & REVENUE REPORT',
+                        dateRangeText:
+                          selectedSalesDate === 'ALL'
+                            ? 'All Recorded Transactions'
+                            : `Date: ${selectedSalesDate}`,
+                      })
+                    }
+                    disabled={filteredSales.length === 0}
+                    className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-rose-700 border border-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    title="Export financial sales audit report to PDF"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Export PDF</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportSalesReportExcel(filteredSales, storeConfig, {
+                        title: 'PERIOD SALES & REVENUE REPORT',
+                        dateRangeText:
+                          selectedSalesDate === 'ALL'
+                            ? 'All Recorded Transactions'
+                            : `Date: ${selectedSalesDate}`,
+                      })
+                    }
+                    disabled={filteredSales.length === 0}
+                    className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-emerald-700 border border-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    title="Export financial sales report to Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Export Excel</span>
                   </button>
                 </div>
               </div>
@@ -2456,6 +2570,153 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                 />
               </div>
 
+              {/* Store Theme & Brand Color Customization */}
+              <div className="pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <label className="block text-slate-800 font-bold text-xs flex items-center gap-1.5">
+                      <Palette className="w-4 h-4 text-amber-600" />
+                      <span>Store Theme & Brand Palette</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Personalize thermal receipts, status badges, PDF exports, and headers with your store colors.
+                    </p>
+                  </div>
+                  {storeConfig.primary_color_hex && (
+                    <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold border border-slate-200 uppercase">
+                      {storeConfig.primary_color_hex}
+                    </span>
+                  )}
+                </div>
+
+                {/* Preset Themes Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                  {THEME_PRESETS_LIST.map((preset) => {
+                    const isSelected =
+                      (storeConfig.primary_color === preset.id && !storeConfig.primary_color_hex) ||
+                      storeConfig.primary_color_hex?.toLowerCase() === preset.primary.toLowerCase() ||
+                      (!storeConfig.primary_color && preset.id === 'amber');
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handleSelectTheme(preset.id, preset.primary)}
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between relative ${
+                          isSelected
+                            ? 'border-slate-900 bg-slate-50 ring-2 ring-slate-900/10 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-4 h-4 rounded-full shadow-xs border border-white shrink-0"
+                              style={{ backgroundColor: preset.primary }}
+                            />
+                            <span className="font-bold text-[11px] text-slate-800 truncate">
+                              {preset.name}
+                            </span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-slate-900 shrink-0" />}
+                        </div>
+                        <span className="text-[10px] text-slate-500 line-clamp-1">
+                          {preset.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Store Color Input */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative">
+                      <input
+                        type="color"
+                        id="store-theme-color-picker"
+                        value={storeConfig.primary_color_hex || '#D97706'}
+                        onChange={(e) => handleSelectTheme('custom', e.target.value)}
+                        className="w-9 h-9 rounded-lg border border-slate-300 cursor-pointer overflow-hidden p-0 bg-transparent"
+                        title="Pick custom store color"
+                      />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-800 text-[11px]">Custom Store Color Hex</div>
+                      <div className="text-[10px] text-slate-500">Pick any exact store brand color</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 font-mono text-xs">#</span>
+                    <input
+                      type="text"
+                      maxLength={7}
+                      value={(storeConfig.primary_color_hex || '#D97706').replace('#', '')}
+                      onChange={(e) => {
+                        const val = '#' + e.target.value.replace(/[^0-9A-Fa-f]/g, '').slice(0, 6);
+                        handleSelectTheme('custom', val);
+                      }}
+                      placeholder="D97706"
+                      className="w-24 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 uppercase focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTheme('amber', '#D97706')}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer px-1"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Receipt & Document Preview */}
+                {(() => {
+                  const theme = getThemeDetails(storeConfig.primary_color, storeConfig.primary_color_hex);
+                  return (
+                    <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                          Live Store Theme Preview
+                        </span>
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-xs"
+                          style={{ backgroundColor: theme.primary }}
+                        >
+                          {theme.name} Active
+                        </span>
+                      </div>
+                      <div
+                        className="p-3 rounded-lg border bg-slate-50/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
+                        style={{ borderTopWidth: 4, borderTopColor: theme.primary }}
+                      >
+                        <div>
+                          <div className="font-bold text-xs" style={{ color: theme.dark }}>
+                            {storeConfig.store_name || 'Bazu Liquor Store'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Thermal receipt header, PDF export header, & accent borders automatically reflect this color.
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="px-2 py-1 rounded-md text-[11px] font-semibold text-white shadow-xs"
+                            style={{ backgroundColor: theme.primary }}
+                          >
+                            Accent Button
+                          </span>
+                          <span
+                            className="px-2 py-1 rounded-md text-[11px] font-semibold border"
+                            style={{ borderColor: theme.primary, color: theme.primary }}
+                          >
+                            Outlined
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
               <div className="pt-2 flex items-center justify-between">
                 {configSuccessMsg && (
                   <span className="text-emerald-700 font-semibold flex items-center gap-1">
@@ -2501,6 +2762,9 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
         {activeTab === 'customers' && (
           <div className="max-w-7xl mx-auto">
             <CustomersSheet
+              currentUser={currentUser}
+              storeConfig={storeConfig}
+              onClose={() => setActiveTab('inventory')}
               onSelectCustomerForSale={(customer) => {
                 if (onSelectCustomerForSale) {
                   onSelectCustomerForSale(customer);
@@ -3134,11 +3398,14 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
       {/* REPRINT RECEIPT MODAL */}
       {reprintSaleModal && (
         <ReceiptModal
-          sale={reprintSaleModal.sale}
-          items={reprintSaleModal.items}
+          sale={reprintSaleModal}
+          items={reprintSaleItems}
           storeConfig={storeConfig}
-          cashierName={reprintSaleModal.sale.cashier_name}
-          onClose={() => setReprintSaleModal(null)}
+          cashierName={reprintSaleModal.cashier_name}
+          onClose={() => {
+            setReprintSaleModal(null);
+            setReprintSaleItems([]);
+          }}
         />
       )}
 
