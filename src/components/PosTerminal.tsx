@@ -2,9 +2,11 @@ import React, { useState, useMemo } from 'react';
 import {
   AlertTriangle,
   Banknote,
+  Beer,
   ChevronRight,
   Clock,
   FileText,
+  HardDrive,
   History,
   Home,
   KeyRound,
@@ -19,6 +21,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Smartphone,
+  Sparkles,
   Tags,
   Trash2,
   TrendingUp,
@@ -30,6 +33,7 @@ import {
   CartItem,
   Category,
   Customer,
+  CustomerTab,
   PaymentMethod,
   Product,
   ProductCategory,
@@ -47,8 +51,12 @@ import { ReceiptModal } from './ReceiptModal';
 import { AdminOverlay, AdminTab } from './AdminOverlay';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { PrintReceiptModule } from './PrintReceiptModule';
+import { CustomerTabsModal } from './CustomerTabsModal';
+import { TabBillModal } from './TabBillModal';
+import { SettleTabModal } from './SettleTabModal';
+import { SmartStockUploadModal } from './SmartStockUploadModal';
+import { LocalBackupModal } from './LocalBackupModal';
 import { BazuLogo } from './BazuLogo';
-import { PWAInstallButton } from './PWAInstallButton';
 import { HomeMenuScreen } from './HomeMenuScreen';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -79,6 +87,14 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isPrintReceiptModuleOpen, setIsPrintReceiptModuleOpen] = useState(false);
+  const [isCustomerTabsOpen, setIsCustomerTabsOpen] = useState(false);
+  const [isSmartStockOpen, setIsSmartStockOpen] = useState(false);
+  const [isLocalBackupOpen, setIsLocalBackupOpen] = useState(false);
+  const [activeTabForBill, setActiveTabForBill] = useState<CustomerTab | null>(null);
+  const [activeTabForSettlement, setActiveTabForSettlement] = useState<CustomerTab | null>(null);
+  const [openTabsCount, setOpenTabsCount] = useState<number>(
+    () => LocalDb.getCustomerTabs().filter((t) => t.status === 'OPEN').length
+  );
   const [activeReceipt, setActiveReceipt] = useState<{ sale: Sale; items: SaleItem[] } | null>(null);
   const [activeUser, setActiveUser] = useState<UserModel>(currentUser);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -98,7 +114,15 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   const refreshInventory = () => {
     setProducts(LocalDb.getProducts());
     setCategoriesList(LocalDb.getCategories());
+    setOpenTabsCount(LocalDb.getCustomerTabs().filter((t) => t.status === 'OPEN').length);
   };
+
+  React.useEffect(() => {
+    const unsubscribe = LocalDb.subscribe(() => {
+      refreshInventory();
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Dynamic Categories list derived from LocalDb and seed data
   const categoryOptions = useMemo(() => {
@@ -173,11 +197,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
 
   // Cart calculations
   const totalAmount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+    return (cart || []).reduce((sum, item) => sum + ((item.product && item.product.price) || 0) * (item.quantity || 0), 0);
   }, [cart]);
 
   const totalItemsCount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.quantity, 0);
+    return (cart || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
   }, [cart]);
 
   // Checkout submission
@@ -251,6 +275,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
     destination:
       | 'pos'
       | 'inventory'
+      | 'requisitions'
       | 'customers'
       | 'summary'
       | 'transactions'
@@ -258,11 +283,20 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       | 'receipts'
       | 'users'
       | 'store'
+      | 'tabs'
+      | 'smart-stock'
+      | 'backup'
   ) => {
     if (destination === 'pos') {
       setCurrentView('pos');
     } else if (destination === 'receipts') {
       setIsPrintReceiptModuleOpen(true);
+    } else if (destination === 'tabs') {
+      setIsCustomerTabsOpen(true);
+    } else if (destination === 'smart-stock') {
+      setIsSmartStockOpen(true);
+    } else if (destination === 'backup') {
+      setIsLocalBackupOpen(true);
     } else {
       handleOpenAdmin(destination as AdminTab);
     }
@@ -458,6 +492,27 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
             </span>
           </button>
         </div>
+
+        {/* Customer Bar Tab Quick Hold Button */}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              if (isDrawer) setIsMobileCartOpen(false);
+              setIsCustomerTabsOpen(true);
+            }}
+            className="w-full py-2.5 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-900 dark:text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
+            title="Hold order on customer bar tab without printing receipt until ready to settle"
+          >
+            <Beer className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <span>{cart.length > 0 ? `Hold Order on Tab (${totalItemsCount} items)` : 'Customer Bar Tabs'}</span>
+            {openTabsCount > 0 && (
+              <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                {openTabsCount} open
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -465,14 +520,16 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   return (
     <div className="w-screen h-screen overflow-hidden bg-slate-900 font-sans text-slate-800 select-none">
       {currentView === 'home' ? (
-        <HomeMenuScreen
-          currentUser={activeUser}
-          storeConfig={storeConfig}
-          cart={cart}
-          onNavigate={handleHomeNavigate}
-          onOpenChangePassword={() => setIsChangePasswordOpen(true)}
-          onLogout={onLogout}
-        />
+        <div className="w-full h-full overflow-y-auto overflow-x-hidden touch-pan-y overscroll-contain">
+          <HomeMenuScreen
+            currentUser={activeUser}
+            storeConfig={storeConfig}
+            cart={cart}
+            onNavigate={handleHomeNavigate}
+            onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+            onLogout={onLogout}
+          />
+        </div>
       ) : (
         <div className="flex flex-col h-screen w-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-100 overflow-hidden select-none transition-colors duration-200">
           {/* Top Header - Deep Indigo #1E1B4B with Amber Badge */}
@@ -524,8 +581,32 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
               {/* Theme Mode Toggle */}
               <ThemeToggle />
 
-              {/* Download / Install Android App Button */}
-              <PWAInstallButton />
+              {/* Customer Bar Tabs Button */}
+              <button
+                type="button"
+                onClick={() => setIsCustomerTabsOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all cursor-pointer shadow-xs"
+                title="Manage Customer Bar Tabs (Hold multiple orders without printing receipts)"
+              >
+                <Beer className="w-3.5 h-3.5 text-amber-400" />
+                <span>Tabs</span>
+                {openTabsCount > 0 && (
+                  <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                    {openTabsCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Smart Stock Upload Button */}
+              <button
+                type="button"
+                onClick={() => setIsSmartStockOpen(true)}
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/15 text-xs font-semibold transition-all cursor-pointer"
+                title="Upload New Stock from Invoice Photo, Excel, or PDF"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Smart Restock</span>
+              </button>
 
               {/* Customers & Debts Button */}
               <button
@@ -941,6 +1022,80 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
           storeConfig={storeConfig}
           onClose={() => setIsPrintReceiptModuleOpen(false)}
           onGoHome={handleGoHome}
+        />
+      )}
+
+      {/* Customer Bar Tabs Modal */}
+      {isCustomerTabsOpen && (
+        <CustomerTabsModal
+          isOpen={isCustomerTabsOpen}
+          onClose={() => setIsCustomerTabsOpen(false)}
+          cart={cart}
+          currentCart={cart}
+          currentUser={activeUser}
+          storeConfig={storeConfig}
+          onClearCart={clearCart}
+          cashierName={activeUser.name}
+          onOpenBill={(tab) => setActiveTabForBill(tab)}
+          onPrintTabBill={(tab) => setActiveTabForBill(tab)}
+          onSettleTab={(tab) => setActiveTabForSettlement(tab)}
+        />
+      )}
+
+      {/* Interim Tab Bill / Check Slip Modal */}
+      {activeTabForBill && (
+        <TabBillModal
+          tab={activeTabForBill}
+          storeConfig={storeConfig}
+          onClose={() => setActiveTabForBill(null)}
+          onSettleTab={(tab) => {
+            setActiveTabForBill(null);
+            setActiveTabForSettlement(tab);
+          }}
+        />
+      )}
+
+      {/* Settle Customer Tab Modal */}
+      {activeTabForSettlement && (
+        <SettleTabModal
+          tab={activeTabForSettlement}
+          storeConfig={storeConfig}
+          cashierName={currentUser.name}
+          onClose={() => setActiveTabForSettlement(null)}
+          onSettled={(sale, items) => {
+            setActiveTabForSettlement(null);
+            setActiveReceipt({ sale, items });
+            refreshInventory();
+          }}
+        />
+      )}
+
+      {/* Smart Stock Upload Modal */}
+      {isSmartStockOpen && (
+        <SmartStockUploadModal
+          isOpen={isSmartStockOpen}
+          currentUser={activeUser}
+          storeConfig={storeConfig}
+          onClose={() => {
+            setIsSmartStockOpen(false);
+            refreshInventory();
+          }}
+          onStockApplied={() => refreshInventory()}
+          onRestocked={() => refreshInventory()}
+        />
+      )}
+
+      {/* Local Machine Backup & Restore Modal */}
+      {isLocalBackupOpen && (
+        <LocalBackupModal
+          isOpen={isLocalBackupOpen}
+          currentUser={activeUser}
+          storeConfig={storeConfig}
+          onClose={() => {
+            setIsLocalBackupOpen(false);
+            refreshInventory();
+          }}
+          onRestored={() => refreshInventory()}
         />
       )}
 

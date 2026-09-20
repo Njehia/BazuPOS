@@ -27,5 +27,9 @@ service cloud.firestore {
     match /customer_payments/{paymentId} {
       allow read, write: if true;
     }
+    // Multi-store isolated collections (e.g. stores/the_buzz_liquor/*, stores/early_kick_off/*)
+    match /stores/{storeId}/{document=**} {
+      allow read, write: if true;
+    }
   }
 }

@@ -15,6 +15,8 @@ import {
   User,
   UserPlus,
   X,
+  Ban,
+  ShieldAlert,
 } from 'lucide-react';
 import { Customer, PaymentMethod, SalePaymentStatus, StoreConfig } from '../types';
 import { LocalDb } from '../lib/storage';
@@ -159,6 +161,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return;
     }
 
+    // Blacklisted customers CANNOT be given product on credit
+    if (saleDebtAmount > 0 && selectedCustomer?.blacklisted) {
+      alert(
+        `CREDIT SALE BLOCKED: Customer "${selectedCustomer.name}" is BLACKLISTED.\n\n` +
+        `Reason: ${selectedCustomer.blacklist_reason || 'Flagged by administration'}\n\n` +
+        `Blacklisted customers cannot be given products on credit or partial payment. Full payment via M-Pesa or Cash is required.`
+      );
+      return;
+    }
+
     if (method === 'CASH' && isCashInsufficient) {
       return;
     }
@@ -261,15 +273,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               <div className="flex items-center gap-2">
                 <div
                   className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
-                    customerSummary.hasDebt
+                    selectedCustomer.blacklisted
+                      ? 'bg-rose-600 text-white'
+                      : customerSummary.hasDebt
                       ? 'bg-rose-100 text-rose-700'
                       : 'bg-emerald-100 text-emerald-800'
                   }`}
                 >
-                  <User className="w-3.5 h-3.5" />
+                  {selectedCustomer.blacklisted ? <Ban className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
                 </div>
                 <div>
-                  <div className="font-bold text-slate-900">{selectedCustomer.name}</div>
+                  <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>{selectedCustomer.name}</span>
+                    {selectedCustomer.blacklisted && (
+                      <span className="text-[10px] px-1.5 py-0.2 bg-rose-600 text-white font-black rounded-md">
+                        BLACKLISTED
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-slate-500 font-mono">
                     Lifetime Spend: <strong>KES {customerSummary.totalSpent.toLocaleString()}</strong>
                   </div>
@@ -296,8 +317,24 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           )}
 
+          {/* Blacklisted Customer Warning Banner */}
+          {selectedCustomer?.blacklisted && (
+            <div className="mt-2 text-xs text-white bg-rose-600 p-2.5 rounded-xl border border-rose-700 flex items-center gap-2 shadow-xs animate-shake">
+              <ShieldAlert className="w-5 h-5 shrink-0 text-white" />
+              <div className="leading-tight">
+                <div className="font-black uppercase tracking-wider text-[11px]">
+                  Blacklisted Customer &mdash; Credit Prohibited
+                </div>
+                <div className="text-[11px] text-rose-100 font-medium mt-0.5">
+                  This client cannot be given product on credit or partial debt. Full payment via Cash or M-Pesa is required.
+                  {selectedCustomer.blacklist_reason && ` (${selectedCustomer.blacklist_reason})`}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* User directive reassurance banner */}
-          {selectedCustomer && customerSummary && customerSummary.hasDebt && (
+          {selectedCustomer && !selectedCustomer.blacklisted && customerSummary && customerSummary.hasDebt && (
             <div className="mt-1.5 text-[11px] text-amber-800 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200 flex items-center gap-1 font-medium">
               <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
               <span>
@@ -358,25 +395,38 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
           <button
             type="button"
+            disabled={Boolean(selectedCustomer?.blacklisted)}
             onClick={() => {
+              if (selectedCustomer?.blacklisted) return;
               setMethod('DEBT');
               setPaymentTerm('credit');
             }}
-            className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-              method === 'DEBT'
-                ? 'bg-rose-50 border-rose-500 text-rose-900 shadow-xs'
-                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+            className={`p-2.5 rounded-2xl border flex flex-col items-center gap-1 transition-all ${
+              selectedCustomer?.blacklisted
+                ? 'bg-slate-100 border-slate-200 text-slate-400 opacity-50 cursor-not-allowed'
+                : method === 'DEBT'
+                ? 'bg-rose-50 border-rose-500 text-rose-900 shadow-xs cursor-pointer'
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer'
             }`}
+            title={selectedCustomer?.blacklisted ? 'Blacklisted: Credit purchases strictly prohibited' : 'Credit Sale / Pay Later'}
           >
             <div
               className={`p-1.5 rounded-xl ${
-                method === 'DEBT' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-500'
+                selectedCustomer?.blacklisted
+                  ? 'bg-slate-200 text-slate-400'
+                  : method === 'DEBT'
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-slate-100 text-slate-500'
               }`}
             >
               <CreditCard className="w-4 h-4" />
             </div>
-            <span className="text-xs font-bold leading-tight">Pay Later / Debt</span>
-            <span className="text-[10px] text-rose-600 font-medium">Credit Sale</span>
+            <span className="text-xs font-bold leading-tight">
+              {selectedCustomer?.blacklisted ? 'Credit Blocked' : 'Pay Later / Debt'}
+            </span>
+            <span className="text-[10px] text-rose-600 font-medium">
+              {selectedCustomer?.blacklisted ? 'Blacklisted' : 'Credit Sale'}
+            </span>
           </button>
         </div>
 
@@ -401,25 +451,37 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </button>
               <button
                 type="button"
+                disabled={Boolean(selectedCustomer?.blacklisted)}
                 onClick={() => {
+                  if (selectedCustomer?.blacklisted) return;
                   setPaymentTerm('partial');
                   setAmountPaidNow(Math.round(totalAmount / 2));
                 }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  paymentTerm === 'partial'
-                    ? 'bg-amber-500 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                  selectedCustomer?.blacklisted
+                    ? 'text-slate-400 opacity-40 cursor-not-allowed'
+                    : paymentTerm === 'partial'
+                    ? 'bg-amber-500 text-white shadow-xs cursor-pointer'
+                    : 'text-slate-600 hover:text-slate-900 cursor-pointer'
                 }`}
+                title={selectedCustomer?.blacklisted ? 'Blacklisted: Partial debt not allowed' : 'Partial Payment'}
               >
                 Partial Payment
               </button>
               <button
                 type="button"
+                disabled={Boolean(selectedCustomer?.blacklisted)}
                 onClick={() => {
+                  if (selectedCustomer?.blacklisted) return;
                   setPaymentTerm('credit');
                   setMethod('DEBT');
                 }}
-                className="px-2.5 py-1 rounded-lg text-xs font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                  selectedCustomer?.blacklisted
+                    ? 'text-slate-400 opacity-40 cursor-not-allowed'
+                    : 'text-rose-700 hover:bg-rose-50 cursor-pointer'
+                }`}
+                title={selectedCustomer?.blacklisted ? 'Blacklisted: Credit not allowed' : 'Take all on Credit'}
               >
                 All on Credit
               </button>

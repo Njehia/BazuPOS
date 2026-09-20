@@ -35,8 +35,10 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  ShoppingCart,
   SlidersHorizontal,
   Smartphone,
+  ScanLine,
   Store,
   Tags,
   Trash2,
@@ -47,12 +49,14 @@ import {
   Users,
   X,
   Camera,
+  ClipboardList,
 } from 'lucide-react';
 import {
   Category,
   Product,
   ProductCategory,
   ROLE_DETAILS,
+  Requisition,
   Sale,
   SaleItem,
   StoreConfig,
@@ -67,12 +71,13 @@ import { PrintReceiptModule } from './PrintReceiptModule';
 import { BazuLogo } from './BazuLogo';
 import { CustomersSheet } from './CustomersSheet';
 import { RecentTransactionsView } from './RecentTransactionsView';
+import { RequisitionsModal } from './RequisitionsModal';
 import { exportCustomersExcel, exportCustomersPDF, exportSalesReportExcel, exportSalesReportPDF, exportStockExcel, exportStockPDF } from '../lib/exportUtils';
 import { THEME_PRESETS_LIST, applyStoreTheme, getThemeDetails, useThemeMode } from '../lib/theme';
 import { ThemeToggle } from './ThemeToggle';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 
-export type AdminTab = 'inventory' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
+export type AdminTab = 'inventory' | 'requisitions' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
 interface AdminOverlayProps {
   currentUser: User;
@@ -97,6 +102,11 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || 'inventory');
   const [products, setProducts] = useState<Product[]>(() => LocalDb.getProducts());
+  const [requisitions, setRequisitions] = useState<Requisition[]>(() => LocalDb.getRequisitions());
+  const pendingRequisitionsCount = useMemo(
+    () => requisitions.filter((r) => r.status === 'PENDING').length,
+    [requisitions]
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [stockFilter, setStockFilter] = useState<'ALL' | 'BELOW_THRESHOLD' | 'OUT_OF_STOCK' | 'LOW_STOCK' | 'HEALTHY'>('ALL');
   const [selectedInventoryCategory, setSelectedInventoryCategory] = useState<string>('all');
@@ -130,7 +140,12 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   const [summaryData, setSummaryData] = useState(() => LocalDb.getDailySummary());
   const [allSales, setAllSales] = useState<Sale[]>(() => LocalDb.getSales());
   const [selectedSalesDate, setSelectedSalesDate] = useState<string>(() => {
-    return new Date().toISOString().slice(0, 10);
+    const dates = LocalDb.getAvailableSalesDates();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const hasToday = dates.some((d) => d.date === todayStr);
+    if (hasToday) return todayStr;
+    if (dates.length > 0) return dates[0].date;
+    return 'ALL';
   });
   const [salesCashierFilter, setSalesCashierFilter] = useState<string>('ALL');
   const [salesPaymentFilter, setSalesPaymentFilter] = useState<'ALL' | 'MPESA' | 'CASH'>('ALL');
@@ -277,6 +292,9 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
 
   const handleStartEdit = (product: Product) => {
     setEditingProduct(product);
+    setNewProdNameInput(product.name);
+    setNewBarcodeEditInput(product.barcode);
+    setNewCategoryEditInput(product.category);
     setNewPriceInput(product.price.toString());
     setNewStockInput(product.stock_qty.toString());
     setNewThresholdInput(product.low_stock_threshold !== undefined ? product.low_stock_threshold.toString() : '');
@@ -289,10 +307,16 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
     // ENFORCE: Non-admins cannot alter product price
     const price = isAdmin ? Math.max(0, Number(newPriceInput) || editingProduct.price) : editingProduct.price;
     const customThreshold = newThresholdInput.trim() === '' ? undefined : Math.max(1, Number(newThresholdInput) || 1);
+    const name = isAdmin ? (newProdNameInput.trim() || editingProduct.name) : editingProduct.name;
+    const barcode = isAdmin ? (newBarcodeEditInput.trim() || editingProduct.barcode) : editingProduct.barcode;
+    const category = (isAdmin && newCategoryEditInput) ? (newCategoryEditInput as ProductCategory) : editingProduct.category;
 
     const res = LocalDb.updateProduct(
       editingProduct.id,
       {
+        name,
+        barcode,
+        category,
         price,
         stock_qty: stock,
         low_stock_threshold: customThreshold,
@@ -306,6 +330,19 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
     }
 
     setEditingProduct(null);
+    setProductFeedbackError(null);
+    reloadData();
+  };
+
+  const handleDeleteProduct = (product: Product) => {
+    const res = LocalDb.deleteProduct(product.id, currentUser.role);
+    if (!res.success) {
+      setProductFeedbackError(res.error || 'Failed to delete product from inventory.');
+      setProductToDelete(null);
+      return;
+    }
+    setEditingProduct(null);
+    setProductToDelete(null);
     setProductFeedbackError(null);
     reloadData();
   };
@@ -528,13 +565,31 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
     setSelectedSalesDate(`${year}-${month}-${day}`);
   };
 
+  const formatSalesDateDisplay = (dateStr: string) => {
+    if (!dateStr || dateStr === 'ALL') return 'All Time Sales Journal';
+    try {
+      const parsed = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
+      if (isNaN(parsed.getTime())) return dateStr;
+      return parsed.toLocaleDateString('en-KE', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const availableSalesDates = useMemo(() => {
     return LocalDb.getAvailableSalesDates();
   }, [allSales]);
 
   const filteredSales = useMemo(() => {
+    if (!Array.isArray(allSales)) return [];
     return allSales.filter((s) => {
-      const saleDate = s.created_at.slice(0, 10);
+      if (!s) return false;
+      const saleDate = s.created_at ? String(s.created_at).slice(0, 10) : '';
       if (selectedSalesDate !== 'ALL' && saleDate !== selectedSalesDate) {
         return false;
       }
@@ -546,9 +601,10 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
       }
       if (salesSearchQuery.trim()) {
         const q = salesSearchQuery.toLowerCase().trim();
-        const matchId = s.id.toString().includes(q) || `rcp-${s.id.toString().slice(-6)}`.toLowerCase().includes(q);
-        const matchCashier = s.cashier_name.toLowerCase().includes(q);
-        const matchMpesa = s.mpesa_code ? s.mpesa_code.toLowerCase().includes(q) : false;
+        const idStr = s.id !== undefined && s.id !== null ? String(s.id).toLowerCase() : '';
+        const matchId = idStr.includes(q) || `rcp-${idStr.slice(-6)}`.includes(q);
+        const matchCashier = s.cashier_name ? String(s.cashier_name).toLowerCase().includes(q) : false;
+        const matchMpesa = s.mpesa_code ? String(s.mpesa_code).toLowerCase().includes(q) : false;
         if (!matchId && !matchCashier && !matchMpesa) {
           return false;
         }
@@ -558,17 +614,21 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   }, [allSales, selectedSalesDate, salesCashierFilter, salesPaymentFilter, salesSearchQuery]);
 
   const salesMetrics = useMemo(() => {
-    const cashTotal = filteredSales
-      .filter((s) => s.payment_method === 'CASH')
-      .reduce((sum, s) => sum + s.total_amount, 0);
-    const mpesaTotal = filteredSales
-      .filter((s) => s.payment_method === 'MPESA')
-      .reduce((sum, s) => sum + s.total_amount, 0);
-    const grandTotal = cashTotal + mpesaTotal;
-    const count = filteredSales.length;
-    const totalUnits = filteredSales.reduce((acc, s) => acc + s.items_count, 0);
+    const safeSales = Array.isArray(filteredSales) ? filteredSales : [];
+    const cashTotal = safeSales
+      .filter((s) => s && s.payment_method === 'CASH')
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+    const mpesaTotal = safeSales
+      .filter((s) => s && s.payment_method === 'MPESA')
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+    const debtTotal = safeSales
+      .filter((s) => s && s.payment_method === 'DEBT')
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+    const grandTotal = safeSales.reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+    const count = safeSales.length;
+    const totalUnits = safeSales.reduce((acc, s) => acc + (Number(s.items_count) || 0), 0);
     const aov = count > 0 ? Math.round(grandTotal / count) : 0;
-    return { cashTotal, mpesaTotal, grandTotal, count, totalUnits, aov };
+    return { cashTotal, mpesaTotal, debtTotal, grandTotal, count, totalUnits, aov };
   }, [filteredSales]);
 
   const hourlyData = useMemo(() => {
@@ -581,12 +641,21 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
         total: 0,
       });
     }
-    for (const s of filteredSales) {
-      const h = new Date(s.created_at).getHours();
-      const entry = hours.find((item) => item.hour === h);
-      if (entry) {
-        entry.count += 1;
-        entry.total += s.total_amount;
+    const safeSales = Array.isArray(filteredSales) ? filteredSales : [];
+    for (const s of safeSales) {
+      if (!s || !s.created_at) continue;
+      try {
+        const d = new Date(s.created_at);
+        if (!isNaN(d.getTime())) {
+          const h = d.getHours();
+          const entry = hours.find((item) => item.hour === h);
+          if (entry) {
+            entry.count += 1;
+            entry.total += Number(s.total_amount) || 0;
+          }
+        }
+      } catch {
+        // ignore malformed date
       }
     }
     const maxRevenue = Math.max(1, ...hours.map((h) => h.total));
@@ -698,13 +767,31 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
 
           <button
             type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
-            title="Close overlay"
+            onClick={() => {
+              if (onGoHome) {
+                onGoHome();
+              } else {
+                onClose();
+              }
+            }}
+            className="p-2 sm:px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            title="Go Back"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Back to POS</span>
+            <span className="hidden sm:inline">Back</span>
           </button>
+
+          {onGoToPos && (
+            <button
+              type="button"
+              onClick={onGoToPos}
+              className="hidden lg:flex p-2 sm:px-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors items-center gap-1.5 text-xs font-semibold cursor-pointer"
+              title="Go to POS Register"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>POS</span>
+            </button>
+          )}
           <div className="flex items-center gap-2.5">
             <BazuLogo className="w-9 h-9 shrink-0 shadow-md" />
             <div>
@@ -747,6 +834,23 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
             >
               <Package className="w-3.5 h-3.5" />
               <span>Inventory</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('requisitions')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === 'requisitions'
+                  ? 'bg-amber-500 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>Requisitions</span>
+              {pendingRequisitionsCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-black animate-pulse">
+                  {pendingRequisitionsCount}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -830,6 +934,19 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               <span>Store Settings</span>
             </button>
           </div>
+
+          {/* Prominent Close (X) Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onGoHome) onGoHome();
+              else onClose();
+            }}
+            className="p-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-white transition-colors flex items-center justify-center cursor-pointer shrink-0 ml-1 shadow-xs"
+            title="Close Panel and Exit (X)"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
@@ -1317,10 +1434,20 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                                   type="button"
                                   onClick={() => handleStartEdit(p)}
                                   className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors cursor-pointer ml-0.5"
-                                  title="Edit Price, Stock Count & Alert Threshold"
+                                  title="Edit Product Details, Price, Stock & Barcode"
                                 >
                                   <Edit2 className="w-3.5 h-3.5" />
                                 </button>
+                                {isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setProductToDelete(p)}
+                                    className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer ml-0.5"
+                                    title="Delete Product from Inventory"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1331,6 +1458,33 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                 </table>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB: REQUISITIONS & RESTOCK REQUESTS */}
+        {activeTab === 'requisitions' && (
+          <div className="max-w-7xl mx-auto">
+            <RequisitionsModal
+              currentUser={currentUser}
+              storeConfig={storeConfig}
+              onClose={() => {
+                if (onGoHome) onGoHome();
+                else onClose();
+              }}
+              onGoHome={() => {
+                if (onGoHome) onGoHome();
+                else onClose();
+              }}
+              onGoToPos={() => {
+                if (onGoToPos) onGoToPos();
+                else onClose();
+              }}
+              onInventoryChanged={() => {
+                setProducts(LocalDb.getProducts());
+                setRequisitions(LocalDb.getRequisitions());
+                onInventoryChanged();
+              }}
+            />
           </div>
         )}
 
@@ -1615,7 +1769,18 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
             currentUser={currentUser}
             storeConfig={storeConfig}
             onSelectCustomer={onSelectCustomerForSale}
-            onClose={onClose}
+            onClose={() => {
+              if (onGoHome) onGoHome();
+              else onClose();
+            }}
+            onGoHome={() => {
+              if (onGoHome) onGoHome();
+              else onClose();
+            }}
+            onGoToPos={() => {
+              if (onGoToPos) onGoToPos();
+              else onClose();
+            }}
           />
         )}
 
@@ -1777,14 +1942,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                   <span>
                     Viewing records for:{' '}
                     <strong className="text-slate-900 font-mono">
-                      {selectedSalesDate === 'ALL'
-                        ? 'All Time Sales Journal'
-                        : new Date(selectedSalesDate + 'T12:00:00').toLocaleDateString('en-KE', {
-                            weekday: 'long',
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
+                      {formatSalesDateDisplay(selectedSalesDate)}
                     </strong>
                   </span>
                 </div>
@@ -2764,7 +2922,18 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
             <CustomersSheet
               currentUser={currentUser}
               storeConfig={storeConfig}
-              onClose={() => setActiveTab('inventory')}
+              onClose={() => {
+                if (onGoHome) onGoHome();
+                else onClose();
+              }}
+              onGoHome={() => {
+                if (onGoHome) onGoHome();
+                onClose();
+              }}
+              onGoToPos={() => {
+                if (onGoToPos) onGoToPos();
+                else onClose();
+              }}
               onSelectCustomerForSale={(customer) => {
                 if (onSelectCustomerForSale) {
                   onSelectCustomerForSale(customer);
@@ -2779,9 +2948,12 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
       {/* EDIT MODAL FOR INVENTORY */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600">
+                  Inventory Master Edit
+                </span>
                 <h3 className="text-sm font-bold text-slate-900">{editingProduct.name}</h3>
                 <span className="text-[11px] text-slate-500 font-mono">{editingProduct.barcode}</span>
               </div>
@@ -2794,7 +2966,102 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            {productFeedbackError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{productFeedbackError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3.5 text-xs">
+              {/* Product Name */}
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Product Name</label>
+                {isAdmin ? (
+                  <input
+                    type="text"
+                    value={newProdNameInput}
+                    onChange={(e) => setNewProdNameInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 font-bold text-xs focus:bg-white focus:outline-none focus:border-amber-500"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    disabled
+                    value={newProdNameInput}
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-500 font-bold text-xs cursor-not-allowed"
+                  />
+                )}
+              </div>
+
+              {/* Barcode & Scanner */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-700 font-semibold">Barcode / SKU</label>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setIsBarcodeScannerOpen(true)}
+                      className="text-[11px] text-amber-600 hover:text-amber-800 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <ScanLine className="w-3.5 h-3.5" />
+                      <span>Scan Barcode</span>
+                    </button>
+                  )}
+                </div>
+                {isAdmin ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newBarcodeEditInput}
+                      onChange={(e) => setNewBarcodeEditInput(e.target.value)}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 font-mono text-xs focus:bg-white focus:outline-none focus:border-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsBarcodeScannerOpen(true)}
+                      className="p-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold cursor-pointer"
+                      title="Scan using camera"
+                    >
+                      <ScanLine className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    disabled
+                    value={newBarcodeEditInput}
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-500 font-mono text-xs cursor-not-allowed"
+                  />
+                )}
+              </div>
+
+              {/* Category */}
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Category</label>
+                {isAdmin ? (
+                  <select
+                    value={newCategoryEditInput}
+                    onChange={(e) => setNewCategoryEditInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 text-xs focus:bg-white focus:outline-none focus:border-amber-500 cursor-pointer capitalize"
+                  >
+                    {categories.map((c) => (
+                      <option key={`edit-cat-${c.id}`} value={c.name}>
+                        {c.icon || '🏷️'} {c.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    disabled
+                    value={newCategoryEditInput}
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-500 text-xs cursor-not-allowed capitalize"
+                  />
+                )}
+              </div>
+
+              {/* Selling Price */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-slate-700 font-semibold">Selling Price (KES)</label>
@@ -2827,6 +3094,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                 )}
               </div>
 
+              {/* Stock Count */}
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
                   Physical Stock Count (Bottles/Units)
@@ -2839,6 +3107,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                 />
               </div>
 
+              {/* Low Stock Alert Threshold */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-slate-700 font-semibold">
@@ -2856,30 +3125,101 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 font-mono text-sm focus:bg-white focus:outline-none focus:border-amber-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Leave empty to use store default ({defaultThreshold} units), or define a custom reorder threshold for this specific bottle.
+                  Leave empty to use store default ({defaultThreshold} units), or define a custom reorder threshold.
                 </p>
               </div>
             </div>
 
+            {/* Delete Option & Action Buttons */}
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              {(isAdmin || currentUser.role === 'MANAGER') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductToDelete(editingProduct);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Delete Product from Inventory</span>
+                </button>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveProductEdit}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-sm cursor-pointer"
+                >
+                  {isAdmin ? 'Save Product Details' : 'Update Stock Count'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM DELETE PRODUCT MODAL */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Product</h3>
+                <p className="text-xs text-slate-500">Remove from store catalog</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div className="font-bold text-slate-900">{productToDelete.name}</div>
+              <div className="text-slate-500 font-mono mt-0.5">Barcode: {productToDelete.barcode}</div>
+              <div className="text-slate-500 mt-0.5">Category: {productToDelete.category}</div>
+              <div className="text-amber-700 font-semibold mt-1">Current Stock: {productToDelete.stock_qty} units</div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to permanently delete <strong>{productToDelete.name}</strong> from inventory? This product will no longer appear on POS registers or stock audits.
+            </p>
+
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setEditingProduct(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 cursor-pointer"
+                onClick={() => setProductToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleSaveProductEdit}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-white font-bold text-xs shadow-sm cursor-pointer"
+                onClick={() => handleDeleteProduct(productToDelete)}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm cursor-pointer"
               >
-                {isAdmin ? 'Update Record & Price' : 'Update Stock Count'}
+                Yes, Delete Product
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* BARCODE SCANNER MODAL FOR EDITING */}
+      <BarcodeScannerModal
+        isOpen={isBarcodeScannerOpen}
+        onClose={() => setIsBarcodeScannerOpen(false)}
+        onScan={(scannedBarcode) => {
+          setNewBarcodeEditInput(scannedBarcode);
+          setIsBarcodeScannerOpen(false);
+        }}
+      />
 
       {/* ADD PRODUCT MODAL */}
       {isAddModalOpen && (

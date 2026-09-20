@@ -15,6 +15,12 @@ import {
   RequisitionItem,
   RequisitionStatus,
   RequisitionUrgency,
+  CartItem,
+  CustomerTab,
+  CustomerTabStatus,
+  TabOrderRound,
+  ParsedStockItem,
+  LocalBackupData,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -27,18 +33,36 @@ import {
 } from '../data/seedData';
 import { CloudDb } from './firebase';
 
+function getActiveStoreId(): string {
+  if (typeof window === 'undefined') return 'the_buzz_liquor';
+  try {
+    return localStorage.getItem('bazu_pos_active_store_id') || 'the_buzz_liquor';
+  } catch {
+    return 'the_buzz_liquor';
+  }
+}
+
+function getStoreKey(baseKey: string): string {
+  const storeId = getActiveStoreId();
+  if (storeId === 'the_buzz_liquor') {
+    return baseKey; // Keeps existing backwards-compatibility with default store
+  }
+  return `${baseKey}_${storeId}`;
+}
+
 const STORAGE_KEYS = {
-  USERS: 'bazu_pos_users',
-  DELETED_USER_IDS: 'bazu_pos_deleted_user_ids',
-  PRODUCTS: 'bazu_pos_products',
-  DELETED_PRODUCT_IDS: 'bazu_pos_deleted_product_ids',
-  SALES: 'bazu_pos_sales',
-  SALE_ITEMS: 'bazu_pos_sale_items',
-  STORE_CONFIG: 'bazu_pos_store_config',
-  CATEGORIES: 'bazu_pos_categories',
-  CUSTOMERS: 'bazu_pos_customers',
-  CUSTOMER_PAYMENTS: 'bazu_pos_customer_payments',
-  REQUISITIONS: 'bazu_pos_requisitions',
+  get USERS() { return getStoreKey('bazu_pos_users'); },
+  get DELETED_USER_IDS() { return getStoreKey('bazu_pos_deleted_user_ids'); },
+  get PRODUCTS() { return getStoreKey('bazu_pos_products'); },
+  get DELETED_PRODUCT_IDS() { return getStoreKey('bazu_pos_deleted_product_ids'); },
+  get SALES() { return getStoreKey('bazu_pos_sales'); },
+  get SALE_ITEMS() { return getStoreKey('bazu_pos_sale_items'); },
+  get STORE_CONFIG() { return getStoreKey('bazu_pos_store_config'); },
+  get CATEGORIES() { return getStoreKey('bazu_pos_categories'); },
+  get CUSTOMERS() { return getStoreKey('bazu_pos_customers'); },
+  get CUSTOMER_PAYMENTS() { return getStoreKey('bazu_pos_customer_payments'); },
+  get REQUISITIONS() { return getStoreKey('bazu_pos_requisitions'); },
+  get CUSTOMER_TABS() { return getStoreKey('bazu_pos_customer_tabs'); },
 };
 
 export class LocalDb {
@@ -50,6 +74,10 @@ export class LocalDb {
     return () => {
       this.listeners.delete(callback);
     };
+  }
+
+  static subscribe(callback: () => void): () => void {
+    return this.onSyncUpdate(callback);
   }
 
   private static notifyListeners() {
@@ -961,11 +989,11 @@ export class LocalDb {
     id: number,
     userRole?: UserRole
   ): { success: boolean; products: Product[]; error?: string } {
-    if (userRole && userRole !== 'ADMIN' && userRole !== 'MANAGER') {
+    if (userRole && userRole !== 'ADMIN' && (userRole as string) !== 'MANAGER') {
       return {
         success: false,
         products: this.getProducts(),
-        error: 'Permission Denied: Only Administrator or Manager can delete products from inventory.',
+        error: 'Permission Denied: Only Administrator or Supervisor can delete products from inventory.',
       };
     }
 
@@ -1207,6 +1235,15 @@ export class LocalDb {
         if (parsed.low_stock_threshold === undefined) {
           parsed.low_stock_threshold = 10;
         }
+        if (!parsed.store_id) {
+          parsed.store_id = 'the_buzz_liquor';
+        }
+        if (!parsed.receipt_printer_width) {
+          parsed.receipt_printer_width = '80mm';
+        }
+        if (parsed.receipt_bold_mode === undefined) {
+          parsed.receipt_bold_mode = true;
+        }
         return parsed as StoreConfig;
       }
       return INITIAL_STORE_CONFIG;
@@ -1218,10 +1255,69 @@ export class LocalDb {
   static updateStoreConfig(config: Partial<StoreConfig>): StoreConfig {
     const current = this.getStoreConfig();
     const updated = { ...current, ...config };
+    if (config.store_id && config.store_id !== current.store_id) {
+      localStorage.setItem('bazu_pos_active_store_id', config.store_id);
+    }
     localStorage.setItem(STORAGE_KEYS.STORE_CONFIG, JSON.stringify(updated));
     CloudDb.setStoreConfig(updated);
     this.notifyListeners();
     return updated;
+  }
+
+  // Switch or register an isolated store instance (e.g. "The Early Kick-Off Liquor")
+  static getRegisteredStores(): { id: string; name: string; branch: string }[] {
+    try {
+      const raw = localStorage.getItem('bazu_pos_registered_stores');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    const defaultStores = [
+      { id: 'the_buzz_liquor', name: 'The Buzz Liquor Store', branch: 'Main Branch' },
+      { id: 'the_early_kick_off_liquor', name: 'The Early Kick-Off Liquor', branch: 'Kilimani Branch' },
+    ];
+    localStorage.setItem('bazu_pos_registered_stores', JSON.stringify(defaultStores));
+    return defaultStores;
+  }
+
+  static registerStore(id: string, name: string, branch: string): { id: string; name: string; branch: string } {
+    const cleanId = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || `store_${Date.now()}`;
+    const stores = this.getRegisteredStores();
+    const existingIndex = stores.findIndex((s) => s.id === cleanId);
+    const storeObj = { id: cleanId, name: name.trim(), branch: branch.trim() };
+    if (existingIndex >= 0) {
+      stores[existingIndex] = storeObj;
+    } else {
+      stores.push(storeObj);
+    }
+    localStorage.setItem('bazu_pos_registered_stores', JSON.stringify(stores));
+    return storeObj;
+  }
+
+  static switchStore(storeId: string, storeName?: string, branchName?: string): StoreConfig {
+    const cleanId = storeId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'the_buzz_liquor';
+    localStorage.setItem('bazu_pos_active_store_id', cleanId);
+
+    // Register store in list if not already
+    const name = storeName ? storeName.trim() : (cleanId === 'the_buzz_liquor' ? 'The Buzz Liquor Store' : 'The Early Kick-Off Liquor');
+    const branch = branchName ? branchName.trim() : (cleanId === 'the_buzz_liquor' ? 'Main Branch' : 'Kilimani Branch');
+    this.registerStore(cleanId, name, branch);
+
+    const current = this.getStoreConfig();
+    const newConfig: StoreConfig = {
+      ...current,
+      store_id: cleanId,
+      store_name: name,
+      branch: branch,
+    };
+
+    localStorage.setItem(STORAGE_KEYS.STORE_CONFIG, JSON.stringify(newConfig));
+    CloudDb.setStoreConfig(newConfig);
+
+    // Re-initialize listeners and reload state
+    this.notifyListeners();
+    return newConfig;
   }
 
   // ==========================================
@@ -1601,6 +1697,637 @@ export class LocalDb {
     return { success: true };
   }
 
+  // =========================================================================
+  // CUSTOMER TABS (BAR TABS / HOLD MULTIPLE ORDERS)
+  // =========================================================================
+  static getCustomerTabs(): CustomerTab[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.CUSTOMER_TABS);
+      if (!raw) return [];
+      return JSON.parse(raw) as CustomerTab[];
+    } catch {
+      return [];
+    }
+  }
+
+  static getOpenCustomerTabs(): CustomerTab[] {
+    return this.getCustomerTabs().filter((t) => t.status === 'OPEN');
+  }
+
+  static getTabById(id: string): CustomerTab | undefined {
+    return this.getCustomerTabs().find((t) => t.id === id);
+  }
+
+  static createCustomerTab(params: {
+    tab_name: string;
+    customer_id?: number;
+    customer_name?: string;
+    customer_phone?: string;
+    notes?: string;
+    cashier_name: string;
+    initialItems?: CartItem[];
+  }): { success: boolean; tab?: CustomerTab; error?: string } {
+    const name = params.tab_name.trim();
+    if (!name) {
+      return { success: false, error: 'Tab name or Table number is required.' };
+    }
+
+    const products = this.getProducts();
+    const initialItems = params.initialItems || [];
+
+    // Verify stock availability if initial items are provided
+    for (const ci of initialItems) {
+      const p = products.find((prod) => prod.id === ci.product.id);
+      if (!p) {
+        return { success: false, error: `Product ${ci.product.name} not found in inventory.` };
+      }
+      if (p.stock_qty < ci.quantity) {
+        return {
+          success: false,
+          error: `Insufficient stock for ${ci.product.name}. Available: ${p.stock_qty}`,
+        };
+      }
+    }
+
+    // Deduct stock for round 1 items so inventory stays strictly accurate
+    if (initialItems.length > 0) {
+      const updatedProducts = products.map((p) => {
+        const match = initialItems.find((ci) => ci.product.id === p.id);
+        if (match) {
+          return { ...p, stock_qty: Math.max(0, p.stock_qty - match.quantity) };
+        }
+        return p;
+      });
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+      CloudDb.batchSetProducts(updatedProducts);
+    }
+
+    const roundTotal = initialItems.reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+    const roundItemsCount = initialItems.reduce((sum, ci) => sum + ci.quantity, 0);
+
+    const initialRounds: TabOrderRound[] = [];
+    if (initialItems.length > 0) {
+      initialRounds.push({
+        id: `RND-1-${Date.now()}`,
+        round_number: 1,
+        created_at: new Date().toISOString(),
+        cashier_name: params.cashier_name,
+        items: [...initialItems],
+        round_total: roundTotal,
+        notes: params.notes,
+      });
+    }
+
+    const newTab: CustomerTab = {
+      id: `TAB-${Date.now().toString().slice(-6)}`,
+      tab_name: name,
+      customer_id: params.customer_id,
+      customer_name: params.customer_name,
+      customer_phone: params.customer_phone,
+      status: 'OPEN',
+      opened_at: new Date().toISOString(),
+      opened_by_cashier: params.cashier_name,
+      notes: params.notes,
+      rounds: initialRounds,
+      total_amount: roundTotal,
+      total_items_count: roundItemsCount,
+    };
+
+    const tabs = this.getCustomerTabs();
+    const updatedTabs = [newTab, ...tabs];
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(updatedTabs));
+    this.notifyListeners();
+
+    return { success: true, tab: newTab };
+  }
+
+  static addRoundToTab(
+    tabId: string,
+    items: CartItem[],
+    cashier_name: string,
+    notes?: string
+  ): { success: boolean; tab?: CustomerTab; error?: string } {
+    if (!items || items.length === 0) {
+      return { success: false, error: 'No items in the order round.' };
+    }
+
+    const tabs = this.getCustomerTabs();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) {
+      return { success: false, error: 'Tab not found.' };
+    }
+    if (tab.status !== 'OPEN') {
+      return { success: false, error: `This tab is already ${tab.status.toLowerCase()}.` };
+    }
+
+    const products = this.getProducts();
+
+    // Check stock
+    for (const ci of items) {
+      const p = products.find((prod) => prod.id === ci.product.id);
+      if (!p) {
+        return { success: false, error: `Product ${ci.product.name} not found in inventory.` };
+      }
+      if (p.stock_qty < ci.quantity) {
+        return {
+          success: false,
+          error: `Insufficient stock for ${ci.product.name}. Available: ${p.stock_qty}`,
+        };
+      }
+    }
+
+    // Deduct stock for this round
+    const updatedProducts = products.map((p) => {
+      const match = items.find((ci) => ci.product.id === p.id);
+      if (match) {
+        return { ...p, stock_qty: Math.max(0, p.stock_qty - match.quantity) };
+      }
+      return p;
+    });
+    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+    CloudDb.batchSetProducts(updatedProducts);
+
+    const roundTotal = items.reduce((sum, ci) => sum + ci.product.price * ci.quantity, 0);
+    const roundUnits = items.reduce((sum, ci) => sum + ci.quantity, 0);
+
+    const newRound: TabOrderRound = {
+      id: `RND-${tab.rounds.length + 1}-${Date.now()}`,
+      round_number: tab.rounds.length + 1,
+      created_at: new Date().toISOString(),
+      cashier_name,
+      items: [...items],
+      round_total: roundTotal,
+      notes,
+    };
+
+    const updatedTab: CustomerTab = {
+      ...tab,
+      rounds: [...tab.rounds, newRound],
+      total_amount: tab.total_amount + roundTotal,
+      total_items_count: tab.total_items_count + roundUnits,
+    };
+
+    const updatedTabs = tabs.map((t) => (t.id === tabId ? updatedTab : t));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(updatedTabs));
+    this.notifyListeners();
+
+    return { success: true, tab: updatedTab };
+  }
+
+  static cancelCustomerTab(tabId: string, reason?: string): { success: boolean; tab?: CustomerTab; error?: string } {
+    const tabs = this.getCustomerTabs();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) {
+      return { success: false, error: 'Tab not found.' };
+    }
+    if (tab.status !== 'OPEN') {
+      return { success: false, error: `Cannot cancel a tab that is already ${tab.status.toLowerCase()}.` };
+    }
+
+    // Refund / restore deducted stock for all rounds in this tab
+    const products = this.getProducts();
+    const itemCountsToRefund = new Map<number, number>();
+
+    for (const round of tab.rounds) {
+      for (const ci of round.items) {
+        itemCountsToRefund.set(
+          ci.product.id,
+          (itemCountsToRefund.get(ci.product.id) || 0) + ci.quantity
+        );
+      }
+    }
+
+    if (itemCountsToRefund.size > 0) {
+      const restoredProducts = products.map((p) => {
+        const qtyToRestore = itemCountsToRefund.get(p.id) || 0;
+        if (qtyToRestore > 0) {
+          return { ...p, stock_qty: p.stock_qty + qtyToRestore };
+        }
+        return p;
+      });
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(restoredProducts));
+      CloudDb.batchSetProducts(restoredProducts);
+    }
+
+    const cancelledTab: CustomerTab = {
+      ...tab,
+      status: 'CANCELLED',
+      closed_at: new Date().toISOString(),
+      notes: reason ? `${tab.notes ? tab.notes + ' | ' : ''}Cancelled: ${reason}` : tab.notes,
+    };
+
+    const updatedTabs = tabs.map((t) => (t.id === tabId ? cancelledTab : t));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(updatedTabs));
+    this.notifyListeners();
+
+    return { success: true, tab: cancelledTab };
+  }
+
+  static settleCustomerTab(
+    tabIdOrSettlement:
+      | string
+      | {
+          tab_id: string;
+          payment_method: PaymentMethod;
+          cashier_name: string;
+          mpesa_code?: string;
+          cash_tendered?: number;
+          change_given?: number;
+          amount_paid?: number;
+          debt_amount?: number;
+          customer_id?: number;
+          customer_name?: string;
+          customer_phone?: string;
+        },
+    maybeSettlement?: {
+      payment_method: PaymentMethod;
+      cashier_name: string;
+      mpesa_code?: string;
+      cash_tendered?: number;
+      change_given?: number;
+      amount_paid?: number;
+      debt_amount?: number;
+      customer_id?: number;
+      customer_name?: string;
+      customer_phone?: string;
+    }
+  ): { success: boolean; tab?: CustomerTab; sale?: Sale; items?: SaleItem[]; error?: string } {
+    const tabId = typeof tabIdOrSettlement === 'string' ? tabIdOrSettlement : tabIdOrSettlement.tab_id;
+    const settlement = typeof tabIdOrSettlement === 'object' ? tabIdOrSettlement : maybeSettlement!;
+
+    const tabs = this.getCustomerTabs();
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) {
+      return { success: false, error: 'Tab not found.' };
+    }
+    if (tab.status !== 'OPEN') {
+      return { success: false, error: `Tab is already ${tab.status.toLowerCase()}.` };
+    }
+    if (tab.rounds.length === 0 || tab.total_amount <= 0) {
+      return { success: false, error: 'Tab has no items to settle.' };
+    }
+
+    // Consolidate all items across all rounds in this tab
+    const consolidatedMap = new Map<number, { product: Product; quantity: number }>();
+    for (const round of tab.rounds) {
+      for (const ci of round.items) {
+        const existing = consolidatedMap.get(ci.product.id);
+        if (existing) {
+          existing.quantity += ci.quantity;
+        } else {
+          consolidatedMap.set(ci.product.id, {
+            product: ci.product,
+            quantity: ci.quantity,
+          });
+        }
+      }
+    }
+
+    const cartItems = Array.from(consolidatedMap.values());
+    const totalAmount = tab.total_amount;
+    const amountPaid =
+      settlement.amount_paid !== undefined
+        ? settlement.amount_paid
+        : settlement.payment_method === 'DEBT'
+        ? 0
+        : totalAmount;
+    const debtAmount =
+      settlement.debt_amount !== undefined
+        ? settlement.debt_amount
+        : Math.max(0, totalAmount - amountPaid);
+
+    const paymentStatus: SalePaymentStatus =
+      debtAmount <= 0 ? 'PAID' : amountPaid <= 0 ? 'DEBT' : 'PARTIAL';
+
+    const saleId = Date.now();
+    const newSale: Sale = {
+      id: saleId,
+      cashier_name: settlement.cashier_name,
+      total_amount: totalAmount,
+      payment_method: settlement.payment_method,
+      created_at: new Date().toISOString(),
+      mpesa_code: settlement.mpesa_code,
+      cash_tendered: settlement.cash_tendered,
+      change_given: settlement.change_given,
+      items_count: tab.total_items_count,
+      customer_id: settlement.customer_id ?? tab.customer_id,
+      customer_name: settlement.customer_name ?? tab.customer_name ?? tab.tab_name,
+      customer_phone: settlement.customer_phone ?? tab.customer_phone,
+      amount_paid: amountPaid,
+      debt_amount: debtAmount,
+      payment_status: paymentStatus,
+    };
+
+    const saleItems: SaleItem[] = cartItems.map((ci) => ({
+      id: Number(`${saleId}${ci.product.id}`.slice(-9)),
+      sale_id: saleId,
+      product_id: ci.product.id,
+      product_name: ci.product.name,
+      quantity: ci.quantity,
+      unit_price: ci.product.price,
+      total_price: ci.product.price * ci.quantity,
+    }));
+
+    // Record sale and sale items (stock was already deducted at round additions)
+    const existingSales = this.getSales();
+    const updatedSales = [newSale, ...existingSales];
+    localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(updatedSales));
+
+    const existingItems = this.getSaleItems();
+    const updatedItems = [...saleItems, ...existingItems];
+    localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(updatedItems));
+
+    CloudDb.recordSale(newSale, saleItems);
+
+    // Mark tab as settled
+    const settledTab: CustomerTab = {
+      ...tab,
+      status: 'SETTLED',
+      closed_at: new Date().toISOString(),
+      closed_by_cashier: settlement.cashier_name,
+      settled_sale_id: saleId,
+      payment_method: settlement.payment_method,
+    };
+
+    const updatedTabs = tabs.map((t) => (t.id === tabId ? settledTab : t));
+    localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(updatedTabs));
+    this.notifyListeners();
+
+    return { success: true, tab: settledTab, sale: newSale, items: saleItems };
+  }
+
+  // =========================================================================
+  // LOCAL BACKUP AND RESTORE
+  // =========================================================================
+  static createLocalBackup(): LocalBackupData {
+    const products = this.getProducts();
+    const sales = this.getSales();
+    const sale_items = this.getSaleItems();
+    const customers = this.getCustomers();
+    const customer_payments = this.getCustomerPayments();
+    const customer_tabs = this.getCustomerTabs();
+    const requisitions = this.getRequisitions();
+    const categories = this.getCategories();
+    const store_config = this.getStoreConfig();
+
+    return {
+      version: '1.0',
+      backup_id: `BAZU-BACKUP-${Date.now()}`,
+      created_at: new Date().toISOString(),
+      store_id: getActiveStoreId(),
+      store_name: store_config.store_name || 'Bazu POS',
+      products,
+      categories,
+      sales,
+      sale_items,
+      customers,
+      customer_payments,
+      customer_tabs,
+      requisitions,
+      store_config,
+      metadata: {
+        products_count: products.length,
+        sales_count: sales.length,
+        customers_count: customers.length,
+        tabs_count: customer_tabs.length,
+        requisitions_count: requisitions.length,
+        backup_tool: 'Bazu POS Local Machine Backup Engine',
+      },
+    };
+  }
+
+  static downloadLocalBackup(cashierName?: string): { success: boolean; filename: string } {
+    const backup = this.createLocalBackup();
+    const jsonStr = JSON.stringify(backup, null, 2);
+    const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeStore = (backup.store_name || 'store').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const filename = `bazu_pos_backup_${safeStore}_${dateStr}.json`;
+
+    if (typeof window !== 'undefined') {
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    return { success: true, filename };
+  }
+
+  static restoreFromLocalBackup(
+    backupData: any,
+    mode: 'REPLACE' | 'MERGE' = 'REPLACE'
+  ): {
+    success: boolean;
+    stats: {
+      products: number;
+      sales: number;
+      customers: number;
+      tabs: number;
+      requisitions: number;
+    };
+    error?: string;
+  } {
+    if (!backupData || typeof backupData !== 'object') {
+      return {
+        success: false,
+        stats: { products: 0, sales: 0, customers: 0, tabs: 0, requisitions: 0 },
+        error: 'Invalid backup file: File content is empty or not valid JSON.',
+      };
+    }
+
+    if (!Array.isArray(backupData.products) && !Array.isArray(backupData.sales)) {
+      return {
+        success: false,
+        stats: { products: 0, sales: 0, customers: 0, tabs: 0, requisitions: 0 },
+        error: 'Incompatible backup file: Does not contain required Bazu POS inventory or sales datasets.',
+      };
+    }
+
+    // Safety emergency snapshot before restoring
+    try {
+      const preSnapshot = this.createLocalBackup();
+      localStorage.setItem('bazu_pos_pre_restore_backup', JSON.stringify(preSnapshot));
+    } catch {
+      // ignore storage quota in emergency snapshot
+    }
+
+    try {
+      if (mode === 'REPLACE') {
+        if (Array.isArray(backupData.products)) {
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(backupData.products));
+          CloudDb.batchSetProducts(backupData.products);
+        }
+        if (Array.isArray(backupData.categories)) {
+          localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(backupData.categories));
+        }
+        if (Array.isArray(backupData.sales)) {
+          localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(backupData.sales));
+        }
+        if (Array.isArray(backupData.sale_items)) {
+          localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(backupData.sale_items));
+        }
+        if (Array.isArray(backupData.customers)) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(backupData.customers));
+        }
+        if (Array.isArray(backupData.customer_payments)) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOMER_PAYMENTS, JSON.stringify(backupData.customer_payments));
+        }
+        if (Array.isArray(backupData.customer_tabs)) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(backupData.customer_tabs));
+        }
+        if (Array.isArray(backupData.requisitions)) {
+          localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(backupData.requisitions));
+        }
+        if (backupData.store_config && typeof backupData.store_config === 'object') {
+          localStorage.setItem(STORAGE_KEYS.STORE_CONFIG, JSON.stringify(backupData.store_config));
+        }
+      } else {
+        // MERGE MODE
+        if (Array.isArray(backupData.products)) {
+          const currentProds = this.getProducts();
+          const prodMap = new Map<number, Product>(currentProds.map((p) => [p.id, p]));
+          for (const p of backupData.products) {
+            prodMap.set(p.id, p);
+          }
+          const merged = Array.from(prodMap.values());
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(merged));
+          CloudDb.batchSetProducts(merged);
+        }
+
+        if (Array.isArray(backupData.sales)) {
+          const currentSales = this.getSales();
+          const saleMap = new Map<number, Sale>(currentSales.map((s) => [s.id, s]));
+          for (const s of backupData.sales) {
+            saleMap.set(s.id, s);
+          }
+          const mergedSales = Array.from(saleMap.values()).sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(mergedSales));
+        }
+
+        if (Array.isArray(backupData.customers)) {
+          const currentCust = this.getCustomers();
+          const custMap = new Map<number, Customer>(currentCust.map((c) => [c.id, c]));
+          for (const c of backupData.customers) {
+            custMap.set(c.id, c);
+          }
+          localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(Array.from(custMap.values())));
+        }
+
+        if (Array.isArray(backupData.customer_tabs)) {
+          const currentTabs = this.getCustomerTabs();
+          const tabMap = new Map<string, CustomerTab>(currentTabs.map((t) => [t.id, t]));
+          for (const t of backupData.customer_tabs) {
+            tabMap.set(t.id, t);
+          }
+          localStorage.setItem(STORAGE_KEYS.CUSTOMER_TABS, JSON.stringify(Array.from(tabMap.values())));
+        }
+
+        if (Array.isArray(backupData.requisitions)) {
+          const currentReqs = this.getRequisitions();
+          const reqMap = new Map<string, Requisition>(currentReqs.map((r) => [r.id, r]));
+          for (const r of backupData.requisitions) {
+            reqMap.set(r.id, r);
+          }
+          localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(Array.from(reqMap.values())));
+        }
+      }
+
+      this.notifyListeners();
+
+      const finalProds = this.getProducts();
+      const finalSales = this.getSales();
+      const finalCusts = this.getCustomers();
+      const finalTabs = this.getCustomerTabs();
+      const finalReqs = this.getRequisitions();
+
+      return {
+        success: true,
+        stats: {
+          products: finalProds.length,
+          sales: finalSales.length,
+          customers: finalCusts.length,
+          tabs: finalTabs.length,
+          requisitions: finalReqs.length,
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        stats: { products: 0, sales: 0, customers: 0, tabs: 0, requisitions: 0 },
+        error: `Failed to restore database: ${err?.message || 'Unknown parse error'}`,
+      };
+    }
+  }
+
+  // =========================================================================
+  // SMART STOCK RESTOCK (PICTURE / EXCEL / PDF UPLOAD)
+  // =========================================================================
+  static applyStockRestock(
+    items: ParsedStockItem[],
+    user_name: string
+  ): { success: boolean; updatedCount: number; createdCount: number; error?: string } {
+    const validItems = items.filter((i) => i.status !== 'IGNORED' && i.quantity > 0);
+    if (validItems.length === 0) {
+      return { success: false, updatedCount: 0, createdCount: 0, error: 'No confirmed items to restock.' };
+    }
+
+    const currentProducts = this.getProducts();
+    const categories = this.getCategories();
+    let updatedCount = 0;
+    let createdCount = 0;
+
+    const productMap = new Map<number, Product>(currentProducts.map((p) => [p.id, p]));
+    let maxId = currentProducts.reduce((m, p) => Math.max(m, p.id), 0);
+
+    for (const item of validItems) {
+      if (item.matched_product_id && productMap.has(item.matched_product_id)) {
+        const existing = productMap.get(item.matched_product_id)!;
+        const newStock = existing.stock_qty + item.quantity;
+        const updatedProd: Product = {
+          ...existing,
+          stock_qty: newStock,
+          price: item.selling_price && item.selling_price > 0 ? item.selling_price : existing.price,
+        };
+        productMap.set(existing.id, updatedProd);
+        updatedCount++;
+      } else {
+        // Create new product
+        maxId += 1;
+        const catKey = (item.category || 'General').toLowerCase().trim();
+        const newProduct: Product = {
+          id: maxId,
+          name: item.name.trim(),
+          category: (catKey as any) || 'beer',
+          price: item.selling_price && item.selling_price > 0 ? item.selling_price : 300,
+          stock_qty: item.quantity,
+          unit: item.unit || 'Bottle',
+          barcode: item.barcode || undefined,
+          low_stock_threshold: 10,
+        };
+        productMap.set(maxId, newProduct);
+        createdCount++;
+      }
+    }
+
+    const updatedProductsList = Array.from(productMap.values());
+    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProductsList));
+    CloudDb.batchSetProducts(updatedProductsList);
+    this.notifyListeners();
+
+    return {
+      success: true,
+      updatedCount,
+      createdCount,
+    };
+  }
+
   static resetDatabase() {
     localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
     localStorage.removeItem(STORAGE_KEYS.SALES);
@@ -1610,6 +2337,8 @@ export class LocalDb {
     localStorage.removeItem(STORAGE_KEYS.CATEGORIES);
     localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
     localStorage.removeItem(STORAGE_KEYS.CUSTOMER_PAYMENTS);
+    localStorage.removeItem(STORAGE_KEYS.CUSTOMER_TABS);
+    localStorage.removeItem(STORAGE_KEYS.REQUISITIONS);
     this.notifyListeners();
   }
 }

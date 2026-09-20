@@ -31,6 +31,8 @@ import {
   X,
   Home,
   ArrowLeft,
+  Ban,
+  ShieldAlert,
 } from 'lucide-react';
 import { Customer, CustomerPayment, CustomerSummary, Sale, StoreConfig, User as UserModel } from '../types';
 import { LocalDb } from '../lib/storage';
@@ -59,7 +61,7 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
 }) => {
   const storeConfig = propStoreConfig || LocalDb.getStoreConfig();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterTab, setFilterTab] = useState<'all' | 'debt' | 'cleared'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'debt' | 'cleared' | 'blacklisted'>('all');
   const [sortBy, setSortBy] = useState<'debt' | 'spent' | 'name' | 'recent'>('debt');
 
   // Customer summaries derived from LocalDb
@@ -74,10 +76,33 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
   // Modals state
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<CustomerSummary | null>(null);
+  const [customerToBlacklist, setCustomerToBlacklist] = useState<Customer | null>(null);
+  const [blacklistReasonInput, setBlacklistReasonInput] = useState('');
   const [activeWhatsAppCustomer, setActiveWhatsAppCustomer] = useState<CustomerSummary | null>(null);
   const [activePaymentCustomer, setActivePaymentCustomer] = useState<CustomerSummary | null>(null);
   const [historyCustomer, setHistoryCustomer] = useState<CustomerSummary | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<{ sale: Sale; items: any[] } | null>(null);
+
+  const handleConfirmDeleteCustomer = () => {
+    if (!customerToDelete) return;
+    LocalDb.deleteCustomer(customerToDelete.customer.id);
+    setCustomerToDelete(null);
+    reloadData();
+  };
+
+  const handleConfirmBlacklist = () => {
+    if (!customerToBlacklist) return;
+    LocalDb.toggleCustomerBlacklist(customerToBlacklist.id, blacklistReasonInput.trim() || undefined);
+    setCustomerToBlacklist(null);
+    setBlacklistReasonInput('');
+    reloadData();
+  };
+
+  const handleDirectRemoveBlacklist = (customer: Customer) => {
+    LocalDb.toggleCustomerBlacklist(customer.id);
+    reloadData();
+  };
 
   // Overall store customer aggregates
   const aggregates = useMemo(() => {
@@ -86,6 +111,7 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
     let totalLifetimePaid = 0;
     let totalOutstandingDebt = 0;
     let customersWithDebt = 0;
+    let blacklistedCustomers = 0;
 
     for (const c of customerSummaries) {
       totalLifetimeSpent += c.totalSpent;
@@ -93,6 +119,9 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
       if (c.outstandingDebt > 0) {
         totalOutstandingDebt += c.outstandingDebt;
         customersWithDebt++;
+      }
+      if (c.customer.blacklisted) {
+        blacklistedCustomers++;
       }
     }
 
@@ -102,6 +131,7 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
       totalLifetimePaid,
       totalOutstandingDebt,
       customersWithDebt,
+      blacklistedCustomers,
     };
   }, [customerSummaries]);
 
@@ -121,6 +151,9 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
         }
         if (filterTab === 'cleared') {
           return item.outstandingDebt === 0;
+        }
+        if (filterTab === 'blacklisted') {
+          return Boolean(item.customer.blacklisted);
         }
         return true;
       })
@@ -376,6 +409,27 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
               >
                 ✓ Cleared
               </button>
+              <button
+                type="button"
+                onClick={() => setFilterTab('blacklisted')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  filterTab === 'blacklisted'
+                    ? 'bg-slate-900 text-rose-300 shadow-xs'
+                    : 'text-slate-700 hover:text-rose-700'
+                }`}
+              >
+                <Ban className="w-3 h-3 text-rose-500" />
+                <span>Blacklisted</span>
+                {aggregates.blacklistedCustomers > 0 && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                      filterTab === 'blacklisted' ? 'bg-rose-900 text-rose-200' : 'bg-rose-100 text-rose-800'
+                    }`}
+                  >
+                    {aggregates.blacklistedCustomers}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Sort Dropdown */}
@@ -452,6 +506,14 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
                               {customer.name}
                             </h3>
 
+                            {/* Blacklist Status Pill */}
+                            {customer.blacklisted && (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white flex items-center gap-1 shadow-xs">
+                                <Ban className="w-3.5 h-3.5" />
+                                BLACKLISTED (NO CREDIT)
+                              </span>
+                            )}
+
                             {/* Debt Badge */}
                             {hasDebt ? (
                               <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
@@ -465,6 +527,25 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
                               </span>
                             )}
                           </div>
+
+                          {/* Blacklist details banner if active */}
+                          {customer.blacklisted && (
+                            <div className="bg-rose-50 border border-rose-200 text-rose-800 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between mt-2">
+                              <div className="flex items-center gap-2">
+                                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                                <span>
+                                  <strong>Credit Sales Blocked:</strong> {customer.blacklist_reason || 'Flagged by administration. Goods cannot be provided on credit.'}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDirectRemoveBlacklist(customer)}
+                                className="text-[11px] underline text-rose-900 hover:text-slate-900 font-bold ml-2 shrink-0 cursor-pointer"
+                              >
+                                Remove Flag
+                              </button>
+                            </div>
+                          )}
 
                           {/* Contact and Notes */}
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-slate-600">
@@ -579,6 +660,37 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
                           title="Edit customer details"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Blacklist Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (customer.blacklisted) {
+                              handleDirectRemoveBlacklist(customer);
+                            } else {
+                              setCustomerToBlacklist(customer);
+                              setBlacklistReasonInput('');
+                            }
+                          }}
+                          className={`p-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                            customer.blacklisted
+                              ? 'bg-rose-100 hover:bg-rose-200 text-rose-700 border border-rose-300'
+                              : 'bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-600'
+                          }`}
+                          title={customer.blacklisted ? 'Remove Blacklist Status' : 'Blacklist Customer (Prohibit Credit)'}
+                        >
+                          <Ban className="w-4 h-4" />
+                        </button>
+
+                        {/* Delete Customer Button */}
+                        <button
+                          type="button"
+                          onClick={() => setCustomerToDelete(summary)}
+                          className="p-2 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-600 transition-colors cursor-pointer"
+                          title="Delete Customer Account"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -888,6 +1000,114 @@ export const CustomersSheet: React.FC<CustomersSheetProps> = ({
           storeConfig={storeConfig}
           onClose={() => setSelectedReceipt(null)}
         />
+      )}
+
+      {/* 6. Confirm Delete Customer Modal */}
+      {customerToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Customer</h3>
+                <p className="text-xs text-slate-500">Remove customer record and account</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div className="font-bold text-slate-900">{customerToDelete.customer.name}</div>
+              <div className="text-slate-500 font-mono mt-0.5">{customerToDelete.customer.phone}</div>
+              <div className="text-slate-500 mt-0.5">Lifetime Purchases: KES {customerToDelete.totalSpent.toLocaleString()}</div>
+              {customerToDelete.outstandingDebt > 0 && (
+                <div className="text-rose-600 font-bold mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200">
+                  ⚠️ Note: This customer has an active unpaid balance of KES {customerToDelete.outstandingDebt.toLocaleString()}. Deleting them will remove this customer ledger account.
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to permanently delete <strong>{customerToDelete.customer.name}</strong> from your registered customers? This action cannot be undone.
+            </p>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCustomerToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCustomer}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm cursor-pointer"
+              >
+                Yes, Delete Customer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Blacklist Customer Modal */}
+      {customerToBlacklist && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Ban className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Blacklist Customer</h3>
+                <p className="text-xs text-slate-500">Prohibit credit purchases</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <div className="font-bold text-slate-900">{customerToBlacklist.name}</div>
+              <div className="text-slate-500 font-mono mt-0.5">{customerToBlacklist.phone}</div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Blacklisting <strong>{customerToBlacklist.name}</strong> will flag their account. They will be strictly <strong>prohibited from taking products on credit or debt</strong> at checkout.
+            </p>
+
+            <div>
+              <label className="block text-slate-700 font-semibold text-xs mb-1">
+                Reason for Blacklisting (Optional)
+              </label>
+              <input
+                type="text"
+                value={blacklistReasonInput}
+                onChange={(e) => setBlacklistReasonInput(e.target.value)}
+                placeholder="e.g., Defaulted payment, unreachable number, bad debt"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerToBlacklist(null);
+                  setBlacklistReasonInput('');
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBlacklist}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm cursor-pointer"
+              >
+                Blacklist Customer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

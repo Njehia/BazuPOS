@@ -266,13 +266,16 @@ export function getInitialSalesAndItems(): { sales: Sale[]; items: SaleItem[] } 
 
 export const INITIAL_STORE_CONFIG: StoreConfig = {
   id: 1,
-  store_name: 'Bazu Wines & Spirits',
-  branch: 'Kilimani, Nairobi',
+  store_id: 'the_buzz_liquor',
+  store_name: 'The Buzz Liquor Store',
+  branch: 'Main Branch',
   phone_number: '+254 712 345 678',
   till_number: '889922',
   receipt_footer: 'Asante sana! Karibu tena!\nExcessive consumption of alcohol is harmful to health.\nStrictly not for sale to under 18s.',
   primary_color: 'amber',
   low_stock_threshold: 10,
+  receipt_printer_width: '80mm',
+  receipt_bold_mode: true,
 };
 
 export const INITIAL_PRODUCTS: Product[] = [

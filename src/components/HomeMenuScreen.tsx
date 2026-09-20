@@ -3,9 +3,12 @@ import {
   AlertTriangle,
   ArrowRight,
   Banknote,
+  Beer,
   Calendar,
   CheckCircle2,
+  ClipboardList,
   Clock,
+  HardDrive,
   History,
   Key,
   LogOut,
@@ -15,6 +18,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Smartphone,
+  Sparkles,
   Store,
   Tags,
   TrendingUp,
@@ -33,17 +37,17 @@ import {
 } from '../types';
 import { LocalDb } from '../lib/storage';
 import { BazuLogo } from './BazuLogo';
-import { PWAInstallButton } from './PWAInstallButton';
 import { ThemeToggle } from './ThemeToggle';
 
 interface HomeMenuScreenProps {
   currentUser: User;
   storeConfig: StoreConfig;
-  cart: CartItem[];
+  cart?: CartItem[];
   onNavigate: (
     destination:
       | 'pos'
       | 'inventory'
+      | 'requisitions'
       | 'customers'
       | 'summary'
       | 'transactions'
@@ -51,6 +55,9 @@ interface HomeMenuScreenProps {
       | 'receipts'
       | 'users'
       | 'store'
+      | 'tabs'
+      | 'smart-stock'
+      | 'backup'
   ) => void;
   onOpenChangePassword: () => void;
   onLogout: () => void;
@@ -59,7 +66,7 @@ interface HomeMenuScreenProps {
 export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
   currentUser,
   storeConfig,
-  cart,
+  cart = [],
   onNavigate,
   onOpenChangePassword,
   onLogout,
@@ -104,6 +111,10 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
       0
     );
 
+    // Customer bar tabs
+    const openTabs = LocalDb.getCustomerTabs().filter((t) => t.status === 'OPEN');
+    const openTabsTotal = openTabs.reduce((acc, t) => acc + (t.total_amount || 0), 0);
+
     return {
       totalProducts: products.length,
       categoriesCount: categories.length,
@@ -116,16 +127,19 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
       debtCustomersCount: customersWithDebt.length,
       totalDebtAmount,
       totalSalesCount: sales.length,
+      pendingRequisitionsCount: LocalDb.getRequisitions().filter((r) => r.status === 'PENDING').length,
+      openTabsCount: openTabs.length,
+      openTabsTotal,
     };
   }, []);
 
   // Cart summary
   const cartItemsCount = useMemo(
-    () => cart.reduce((acc, item) => acc + item.quantity, 0),
+    () => (cart || []).reduce((acc, item) => acc + (item.quantity || 0), 0),
     [cart]
   );
   const cartTotalAmount = useMemo(
-    () => cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0),
+    () => (cart || []).reduce((acc, item) => acc + ((item.product && item.product.price) || 0) * (item.quantity || 0), 0),
     [cart]
   );
 
@@ -151,7 +165,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
   const isAdminOrManager = currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER';
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 dark:bg-[#0F172A] text-slate-800 dark:text-slate-100 flex flex-col select-none overflow-y-auto transition-colors duration-200">
+    <div className="w-full min-h-full bg-slate-50 dark:bg-[#0F172A] text-slate-800 dark:text-slate-100 flex flex-col select-none transition-colors duration-200">
       {/* Top Main Navigation Bar */}
       <header className="h-16 sm:h-20 bg-white dark:bg-[#1E1B4B] border-b border-slate-200 dark:border-indigo-950/60 px-4 sm:px-8 flex items-center justify-between shrink-0 shadow-sm dark:shadow-lg sticky top-0 z-30 transition-colors duration-200">
         {/* Brand & Store Details */}
@@ -180,9 +194,6 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Theme Mode Toggle */}
           <ThemeToggle />
-
-          {/* Android PWA Install */}
-          <PWAInstallButton />
 
           {/* User Profile Pill */}
           <div className="flex items-center gap-2.5 bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-1.5 rounded-xl">
@@ -441,6 +452,41 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             </div>
           </div>
 
+          {/* Requisitions & Restock Orders */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('requisitions')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('requisitions');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md relative overflow-hidden"
+          >
+            <div className="w-12 h-12 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <ClipboardList className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors flex items-center gap-2">
+                <span>Stock Requisitions</span>
+                {stats.pendingRequisitionsCount > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500 text-white font-black animate-pulse">
+                    {stats.pendingRequisitionsCount} Pending
+                  </span>
+                )}
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Create restock requests, forward order list directly to Admin phone via WhatsApp attachment, email, or print.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                Open to all staff
+              </span>
+              <span className="font-mono text-slate-400">WhatsApp &amp; PDF</span>
+            </div>
+          </div>
+
           {/* 3. Customers & Debts Management */}
           <div
             role="button"
@@ -587,6 +633,97 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
               <span className="text-purple-600 dark:text-purple-400 font-medium">Thermal 80mm/58mm</span>
               <span className="text-slate-500 dark:text-slate-400">Slip History</span>
+            </div>
+          </div>
+
+          {/* Customer Bar Tabs */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('tabs')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('tabs');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+          >
+            <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <Beer className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors flex items-center gap-2">
+                <span>Customer Bar Tabs</span>
+                {stats.openTabsCount > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-white font-black">
+                    {stats.openTabsCount} Open
+                  </span>
+                )}
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Hold multi-round drink orders for tables and customer groups. Keep serving rounds without printing separate slips, then print an interim bill or settle when ready.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
+                KES {stats.openTabsTotal.toLocaleString()} on Tab
+              </span>
+              <span className="text-slate-500 dark:text-slate-400">{stats.openTabsCount} Active Tabs</span>
+            </div>
+          </div>
+
+          {/* Smart Stock Restock (AI Photo / Excel / PDF) */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('smart-stock')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('smart-stock');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+          >
+            <div className="w-12 h-12 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+                Smart Stock Upload
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Snap a photo of delivery invoices or drag-and-drop supplier Excel/PDF sheets. AI automatically extracts bottles, quantities, and cost prices into inventory.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-purple-600 dark:text-purple-400 font-medium">Auto-Intake</span>
+              <span className="text-slate-500 dark:text-slate-400">Photo • Excel • PDF</span>
+            </div>
+          </div>
+
+          {/* Local Machine Backup & Restore */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('backup')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('backup');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+          >
+            <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <HardDrive className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                Local Backup &amp; Restore
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Safeguard your business data directly on this computer. Save instant timestamped snapshots or restore from any past JSON backup with zero internet needed.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-blue-600 dark:text-blue-400 font-medium">100% Offline &amp; Private</span>
+              <span className="text-slate-500 dark:text-slate-400">JSON Snapshot</span>
             </div>
           </div>
 

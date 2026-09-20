@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { Category, CustomerSummary, Product, Sale, SaleItem, StoreConfig } from '../types';
+import { Category, CustomerSummary, Product, Requisition, Sale, SaleItem, StoreConfig } from '../types';
 import { getThemeDetails } from './theme';
 import { maskPhoneNumber } from './phoneUtils';
 
@@ -765,3 +765,166 @@ export function exportTransactionsExcel(
   XLSX.utils.book_append_sheet(wb, ws, 'Transactions Journal');
   XLSX.writeFile(wb, `transactions_${storeConfig.store_name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+// ==========================================
+// 5. STOCK RESTOCK REQUISITION EXPORTS (PDF & EXCEL)
+// ==========================================
+export function exportRequisitionPDF(req: Requisition, storeConfig: StoreConfig) {
+  const { doc, themeRgb, startY } = createStyledDoc(
+    storeConfig,
+    'OFFICIAL STOCK RESTOCK REQUISITION',
+    `Requisition Order No: ${req.requisition_no}  |  Urgency: ${req.urgency}`
+  );
+
+  const reqDate = new Date(req.created_at).toLocaleString('en-KE');
+
+  // Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(14, startY, 182, 22, 1.5, 1.5, 'F');
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Requisition No: ${req.requisition_no}`, 18, startY + 5);
+  doc.text(`Store / Branch: ${storeConfig.store_name} (${storeConfig.branch})`, 85, startY + 5);
+  doc.text(`Status: ${req.status}`, 155, startY + 5);
+
+  doc.text(`Requested By: ${req.requested_by_name} (${req.requested_by_role})`, 18, startY + 11);
+  doc.text(`Date & Time: ${reqDate}`, 85, startY + 11);
+  doc.text(`Urgency: ${req.urgency}`, 155, startY + 11);
+
+  if (req.notes) {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Notes: ${req.notes.slice(0, 110)}${req.notes.length > 110 ? '...' : ''}`, 18, startY + 17);
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Admin Contact: ${storeConfig.phone_number || 'N/A'} | Till: ${storeConfig.till_number}`, 18, startY + 17);
+  }
+
+  const tableBody = req.items.map((item, idx) => {
+    const estCost = item.estimated_cost || 0;
+    const estTotal = estCost * item.requested_qty;
+    return [
+      (idx + 1).toString(),
+      item.product_name,
+      item.category || 'Liquor',
+      `${item.current_stock} ${item.unit}s`,
+      `${item.requested_qty} ${item.unit}s`,
+      estCost > 0 ? `KES ${estCost.toLocaleString()}` : '-',
+      estTotal > 0 ? `KES ${estTotal.toLocaleString()}` : '-',
+      '[   ]', // Checkbox for physical receiving verification
+    ];
+  });
+
+  const totalQty = req.items.reduce((sum, it) => sum + it.requested_qty, 0);
+  const totalCost = req.items.reduce((sum, it) => sum + ((it.estimated_cost || 0) * it.requested_qty), 0);
+
+  autoTable(doc, {
+    startY: startY + 26,
+    head: [['#', 'Product Name', 'Category', 'In-Stock', 'Order Qty', 'Est. Unit Cost', 'Est. Total', 'Received [x]']],
+    body: tableBody,
+    theme: 'grid',
+    styles: { fontSize: 8, cellPadding: 2.5, textColor: [30, 41, 59] },
+    headStyles: { fillColor: themeRgb, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'left' },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 10 },
+      1: { cellWidth: 50 },
+      2: { cellWidth: 25 },
+      3: { halign: 'center', cellWidth: 20 },
+      4: { halign: 'center', cellWidth: 20, fontStyle: 'bold' },
+      5: { halign: 'right', cellWidth: 22 },
+      6: { halign: 'right', cellWidth: 22, fontStyle: 'bold' },
+      7: { halign: 'center', cellWidth: 13 },
+    },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lastY = (doc as any).lastAutoTable.finalY + 8;
+
+  // Summary and signature block
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(14, lastY, 182, 10, 1.5, 1.5, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Total Products: ${req.items.length}`, 18, lastY + 6.5);
+  doc.text(`Total Units to Restock: ${totalQty}`, 70, lastY + 6.5);
+  if (totalCost > 0) {
+    doc.text(`Total Estimated Cost: KES ${totalCost.toLocaleString()}`, 130, lastY + 6.5);
+  }
+
+  // Signatures
+  const sigY = lastY + 22;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+
+  doc.text('Requested By: _________________________________', 18, sigY);
+  doc.text('Approved By: _________________________________', 110, sigY);
+
+  doc.text(`Name: ${req.requested_by_name}`, 18, sigY + 6);
+  doc.text(`Date: ____________________`, 110, sigY + 6);
+
+  doc.text('Delivery Checked & Received By: _______________________________   Date: ________________', 18, sigY + 14);
+
+  doc.save(`${req.requisition_no}_${storeConfig.store_name.replace(/\s+/g, '_')}.pdf`);
+}
+
+export function exportRequisitionExcel(req: Requisition, storeConfig: StoreConfig) {
+  const wb = XLSX.utils.book_new();
+
+  const reqDate = new Date(req.created_at).toLocaleString('en-KE');
+
+  const headerRows = [
+    [storeConfig.store_name.toUpperCase(), ''],
+    [`Branch: ${storeConfig.branch} | Phone: ${storeConfig.phone_number}`, ''],
+    [`STOCK REQUISITION ORDER: ${req.requisition_no}`, ''],
+    [`Date: ${reqDate} | Urgency: ${req.urgency} | Status: ${req.status}`, ''],
+    [`Requested By: ${req.requested_by_name} (${req.requested_by_role})`, ''],
+    req.notes ? [`Notes: ${req.notes}`, ''] : ['', ''],
+    [],
+    ['#', 'Product Name', 'Category', 'Current Stock', 'Requested Order Qty', 'Unit', 'Est. Unit Cost (KES)', 'Est. Total Cost (KES)', 'Received Status'],
+  ];
+
+  const dataRows = req.items.map((item, idx) => {
+    const estCost = item.estimated_cost || 0;
+    const estTotal = estCost * item.requested_qty;
+    return [
+      idx + 1,
+      item.product_name,
+      item.category || 'General',
+      item.current_stock,
+      item.requested_qty,
+      item.unit || 'Bottle',
+      estCost,
+      estTotal,
+      '',
+    ];
+  });
+
+  const totalQty = req.items.reduce((sum, it) => sum + it.requested_qty, 0);
+  const totalCost = req.items.reduce((sum, it) => sum + ((it.estimated_cost || 0) * it.requested_qty), 0);
+
+  const summaryRow = ['TOTAL', '', '', '', totalQty, '', '', totalCost, ''];
+
+  const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...dataRows, [], summaryRow]);
+
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 35 },
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 20 },
+    { wch: 12 },
+    { wch: 18 },
+    { wch: 20 },
+    { wch: 18 },
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, req.requisition_no);
+  XLSX.writeFile(wb, `${req.requisition_no}_${storeConfig.store_name.replace(/\s+/g, '_')}.xlsx`);
+}
+

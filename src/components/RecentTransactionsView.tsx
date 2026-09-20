@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Banknote,
   Calendar,
@@ -16,6 +17,7 @@ import {
   FileText,
   Filter,
   History,
+  Home,
   Info,
   Package,
   Printer,
@@ -40,6 +42,8 @@ interface RecentTransactionsViewProps {
   storeConfig: StoreConfig;
   onSelectCustomer?: (customer: any) => void;
   onClose?: () => void;
+  onGoHome?: () => void;
+  onGoToPos?: () => void;
 }
 
 type DateRangePreset = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom';
@@ -50,6 +54,8 @@ export const RecentTransactionsView: React.FC<RecentTransactionsViewProps> = ({
   storeConfig,
   onSelectCustomer,
   onClose,
+  onGoHome,
+  onGoToPos,
 }) => {
   const [sales, setSales] = useState<Sale[]>(() => LocalDb.getSales());
   const [allSaleItems, setAllSaleItems] = useState<SaleItem[]>(() => LocalDb.getSaleItems());
@@ -357,6 +363,30 @@ export const RecentTransactionsView: React.FC<RecentTransactionsViewProps> = ({
 
           {/* Action Toolbar */}
           <div className="flex flex-wrap items-center gap-2">
+            {onGoHome && (
+              <button
+                type="button"
+                onClick={onGoHome}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Return to Home Menu"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span>Home</span>
+              </button>
+            )}
+
+            {(onClose || onGoHome) && (
+              <button
+                type="button"
+                onClick={onGoHome || onClose}
+                className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                title="Go Back"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Back</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={reloadData}
@@ -418,6 +448,17 @@ export const RecentTransactionsView: React.FC<RecentTransactionsViewProps> = ({
               <Printer className="w-3.5 h-3.5 text-amber-400" />
               <span>Print Audit</span>
             </button>
+
+            {(onClose || onGoHome) && (
+              <button
+                type="button"
+                onClick={onGoHome || onClose}
+                className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
 

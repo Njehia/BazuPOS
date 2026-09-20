@@ -50,6 +50,49 @@ export const COLLECTIONS = {
   REQUISITIONS: 'requisitions',
 };
 
+// ==========================================
+// MULTI-STORE TENANT ISOLATION
+// Each store (e.g. "The Buzz Liquor", "The Early Kick-Off Liquor")
+// has an independent data partition: /stores/{storeId}/*
+// ==========================================
+export function getActiveStoreId(): string {
+  try {
+    const explicit = localStorage.getItem('bazu_pos_active_store_id');
+    if (explicit && explicit.trim()) {
+      return explicit.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    }
+    const rawConfig = localStorage.getItem('bazu_pos_store_config');
+    if (rawConfig) {
+      const cfg = JSON.parse(rawConfig);
+      if (cfg.store_id && cfg.store_id.trim()) {
+        return cfg.store_id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      }
+      if (cfg.store_name && cfg.store_name.trim()) {
+        const slug = cfg.store_name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        if (slug) return slug;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return 'the_buzz_liquor';
+}
+
+export function setActiveStoreId(newStoreId: string): void {
+  const clean = newStoreId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'the_buzz_liquor';
+  localStorage.setItem('bazu_pos_active_store_id', clean);
+}
+
+export function getStoreColRef(colName: string) {
+  const storeId = getActiveStoreId();
+  return collection(db, 'stores', storeId, colName);
+}
+
+export function getStoreDocRef(colName: string, docId: string) {
+  const storeId = getActiveStoreId();
+  return doc(db, 'stores', storeId, colName, String(docId));
+}
+
 // Live Cloud Sync state subscribers
 type SyncListener = (isLive: boolean, lastSyncTime?: Date) => void;
 const syncStatusListeners: Set<SyncListener> = new Set();
@@ -79,14 +122,14 @@ function notifySyncStatus(isLive: boolean) {
 }
 
 // ==========================================
-// REAL-TIME FIRESTORE REPOSITORIES
+// REAL-TIME FIRESTORE REPOSITORIES (STORE ISOLATED)
 // ==========================================
 
 export class CloudDb {
   // Save or update a single product
   static async setProduct(product: Product): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.PRODUCTS, String(product.id));
+      const ref = getStoreDocRef(COLLECTIONS.PRODUCTS, String(product.id));
       await setDoc(ref, {
         ...product,
         updated_at: new Date().toISOString(),
@@ -102,7 +145,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const p of products) {
-        const ref = doc(db, COLLECTIONS.PRODUCTS, String(p.id));
+        const ref = getStoreDocRef(COLLECTIONS.PRODUCTS, String(p.id));
         batch.set(ref, {
           ...p,
           updated_at: new Date().toISOString(),
@@ -118,7 +161,7 @@ export class CloudDb {
   // Delete product from cloud
   static async deleteProduct(productId: number): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.PRODUCTS, String(productId));
+      const ref = getStoreDocRef(COLLECTIONS.PRODUCTS, String(productId));
       await deleteDoc(ref);
       notifySyncStatus(true);
     } catch (err) {
@@ -126,9 +169,9 @@ export class CloudDb {
     }
   }
 
-  // Subscribe to live products collection across all devices
+  // Subscribe to live products collection across all devices for this store
   static onProductsSnapshot(callback: (products: Product[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.PRODUCTS);
+    const colRef = getStoreColRef(COLLECTIONS.PRODUCTS);
     const q = query(colRef);
     return onSnapshot(
       q,
@@ -166,7 +209,7 @@ export class CloudDb {
       const batch = writeBatch(db);
 
       // Save sale document
-      const saleRef = doc(db, COLLECTIONS.SALES, String(sale.id));
+      const saleRef = getStoreDocRef(COLLECTIONS.SALES, String(sale.id));
       batch.set(saleRef, {
         ...sale,
         created_at: sale.created_at || new Date().toISOString(),
@@ -174,7 +217,7 @@ export class CloudDb {
 
       // Save sale items
       for (const item of items) {
-        const itemRef = doc(db, COLLECTIONS.SALE_ITEMS, String(item.id));
+        const itemRef = getStoreDocRef(COLLECTIONS.SALE_ITEMS, String(item.id));
         batch.set(itemRef, item);
       }
 
@@ -185,9 +228,9 @@ export class CloudDb {
     }
   }
 
-  // Subscribe to live sales across all terminals
+  // Subscribe to live sales across all terminals for this store
   static onSalesSnapshot(callback: (sales: Sale[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.SALES);
+    const colRef = getStoreColRef(COLLECTIONS.SALES);
     const q = query(colRef);
     return onSnapshot(
       q,
@@ -216,7 +259,7 @@ export class CloudDb {
 
   // Subscribe to live sale items
   static onSaleItemsSnapshot(callback: (items: SaleItem[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.SALE_ITEMS);
+    const colRef = getStoreColRef(COLLECTIONS.SALE_ITEMS);
     return onSnapshot(
       colRef,
       (snapshot) => {
@@ -245,7 +288,7 @@ export class CloudDb {
   // Set / Update User
   static async setUser(user: User): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.USERS, String(user.id));
+      const ref = getStoreDocRef(COLLECTIONS.USERS, String(user.id));
       await setDoc(ref, user, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -258,7 +301,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const u of users) {
-        const ref = doc(db, COLLECTIONS.USERS, String(u.id));
+        const ref = getStoreDocRef(COLLECTIONS.USERS, String(u.id));
         batch.set(ref, u, { merge: true });
       }
       await batch.commit();
@@ -271,7 +314,7 @@ export class CloudDb {
   // Delete user from cloud
   static async deleteUser(userId: number): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.USERS, String(userId));
+      const ref = getStoreDocRef(COLLECTIONS.USERS, String(userId));
       await deleteDoc(ref);
       notifySyncStatus(true);
     } catch (err) {
@@ -281,7 +324,7 @@ export class CloudDb {
 
   // Subscribe to live users
   static onUsersSnapshot(callback: (users: User[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.USERS);
+    const colRef = getStoreColRef(COLLECTIONS.USERS);
     return onSnapshot(
       colRef,
       (snapshot) => {
@@ -308,7 +351,7 @@ export class CloudDb {
   // Store config
   static async setStoreConfig(config: StoreConfig): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.STORE_CONFIG, 'main_config');
+      const ref = getStoreDocRef(COLLECTIONS.STORE_CONFIG, 'main_config');
       await setDoc(ref, config, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -318,7 +361,7 @@ export class CloudDb {
 
   // Subscribe to store config
   static onStoreConfigSnapshot(callback: (config: StoreConfig) => void): () => void {
-    const ref = doc(db, COLLECTIONS.STORE_CONFIG, 'main_config');
+    const ref = getStoreDocRef(COLLECTIONS.STORE_CONFIG, 'main_config');
     return onSnapshot(
       ref,
       (docSnap) => {
@@ -337,7 +380,7 @@ export class CloudDb {
   // Categories
   static async setCategory(category: Category): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.CATEGORIES, category.id);
+      const ref = getStoreDocRef(COLLECTIONS.CATEGORIES, category.id);
       await setDoc(ref, category, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -349,7 +392,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const cat of categories) {
-        const ref = doc(db, COLLECTIONS.CATEGORIES, cat.id);
+        const ref = getStoreDocRef(COLLECTIONS.CATEGORIES, cat.id);
         batch.set(ref, cat, { merge: true });
       }
       await batch.commit();
@@ -361,8 +404,7 @@ export class CloudDb {
 
   static async deleteCategory(categoryId: string): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.CATEGORIES, categoryId);
-      const { deleteDoc } = await import('firebase/firestore');
+      const ref = getStoreDocRef(COLLECTIONS.CATEGORIES, categoryId);
       await deleteDoc(ref);
       notifySyncStatus(true);
     } catch (err) {
@@ -371,7 +413,7 @@ export class CloudDb {
   }
 
   static onCategoriesSnapshot(callback: (categories: Category[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.CATEGORIES);
+    const colRef = getStoreColRef(COLLECTIONS.CATEGORIES);
     return onSnapshot(
       colRef,
       (snapshot) => {
@@ -393,7 +435,7 @@ export class CloudDb {
   // ==========================================
   static async setCustomer(customer: Customer): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.CUSTOMERS, String(customer.id));
+      const ref = getStoreDocRef(COLLECTIONS.CUSTOMERS, String(customer.id));
       await setDoc(ref, customer, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -405,7 +447,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const c of customers) {
-        const ref = doc(db, COLLECTIONS.CUSTOMERS, String(c.id));
+        const ref = getStoreDocRef(COLLECTIONS.CUSTOMERS, String(c.id));
         batch.set(ref, c, { merge: true });
       }
       await batch.commit();
@@ -417,8 +459,7 @@ export class CloudDb {
 
   static async deleteCustomer(customerId: number): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.CUSTOMERS, String(customerId));
-      const { deleteDoc } = await import('firebase/firestore');
+      const ref = getStoreDocRef(COLLECTIONS.CUSTOMERS, String(customerId));
       await deleteDoc(ref);
       notifySyncStatus(true);
     } catch (err) {
@@ -427,7 +468,7 @@ export class CloudDb {
   }
 
   static onCustomersSnapshot(callback: (customers: Customer[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.CUSTOMERS);
+    const colRef = getStoreColRef(COLLECTIONS.CUSTOMERS);
     return onSnapshot(
       colRef,
       (snapshot) => {
@@ -452,7 +493,7 @@ export class CloudDb {
   // Customer debt repayments
   static async recordCustomerPayment(payment: CustomerPayment): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.CUSTOMER_PAYMENTS, String(payment.id));
+      const ref = getStoreDocRef(COLLECTIONS.CUSTOMER_PAYMENTS, String(payment.id));
       await setDoc(ref, payment, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -464,7 +505,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const p of payments) {
-        const ref = doc(db, COLLECTIONS.CUSTOMER_PAYMENTS, String(p.id));
+        const ref = getStoreDocRef(COLLECTIONS.CUSTOMER_PAYMENTS, String(p.id));
         batch.set(ref, p, { merge: true });
       }
       await batch.commit();
@@ -475,7 +516,7 @@ export class CloudDb {
   }
 
   static onCustomerPaymentsSnapshot(callback: (payments: CustomerPayment[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.CUSTOMER_PAYMENTS);
+    const colRef = getStoreColRef(COLLECTIONS.CUSTOMER_PAYMENTS);
     return onSnapshot(
       colRef,
       (snapshot) => {
@@ -504,7 +545,7 @@ export class CloudDb {
   // ==========================================
   static async setRequisition(req: Requisition): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.REQUISITIONS, String(req.id));
+      const ref = getStoreDocRef(COLLECTIONS.REQUISITIONS, String(req.id));
       await setDoc(ref, req, { merge: true });
       notifySyncStatus(true);
     } catch (err) {
@@ -516,7 +557,7 @@ export class CloudDb {
     try {
       const batch = writeBatch(db);
       for (const r of requisitions) {
-        const ref = doc(db, COLLECTIONS.REQUISITIONS, String(r.id));
+        const ref = getStoreDocRef(COLLECTIONS.REQUISITIONS, String(r.id));
         batch.set(ref, r, { merge: true });
       }
       await batch.commit();
@@ -528,7 +569,7 @@ export class CloudDb {
 
   static async deleteRequisition(reqId: string): Promise<void> {
     try {
-      const ref = doc(db, COLLECTIONS.REQUISITIONS, String(reqId));
+      const ref = getStoreDocRef(COLLECTIONS.REQUISITIONS, String(reqId));
       await deleteDoc(ref);
       notifySyncStatus(true);
     } catch (err) {
@@ -537,7 +578,7 @@ export class CloudDb {
   }
 
   static onRequisitionsSnapshot(callback: (requisitions: Requisition[]) => void): () => void {
-    const colRef = collection(db, COLLECTIONS.REQUISITIONS);
+    const colRef = getStoreColRef(COLLECTIONS.REQUISITIONS);
     return onSnapshot(
       colRef,
       (snapshot) => {

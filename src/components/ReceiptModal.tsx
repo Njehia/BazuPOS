@@ -234,25 +234,25 @@ Thank you for your business! 🍷`;
           <div
             id="thermal-receipt"
             style={{
-              maxWidth: paperWidth === '58mm' ? '260px' : '360px',
+              maxWidth: paperWidth === '58mm' ? '280px' : '380px',
               borderTopColor: 'var(--theme-receipt-border, #d97706)',
             }}
-            className="w-full bg-white text-black p-5 rounded-md shadow-md font-mono text-sm border-t-8 print:shadow-none print:m-0 transition-all font-bold"
+            className="w-full bg-white text-black p-5 rounded-md shadow-md font-mono text-sm sm:text-base border-t-8 print:shadow-none print:m-0 transition-all font-extrabold"
           >
             {/* Store Branding */}
             <div className="text-center pb-3 border-b-2 border-dashed border-black">
-              <div className="print-title font-black text-lg tracking-wider uppercase text-black">
+              <div className="print-title font-black text-xl tracking-wider uppercase text-black">
                 {storeConfig.store_name}
               </div>
-              <div className="print-header-sub text-xs text-black font-bold">{storeConfig.branch}</div>
-              <div className="print-header-sub text-xs text-black font-bold">Tel: {storeConfig.phone_number}</div>
-              <div className="print-header-sub text-xs font-black text-black mt-0.5">
+              <div className="print-header-sub text-sm text-black font-extrabold">{storeConfig.branch}</div>
+              <div className="print-header-sub text-sm text-black font-extrabold">Tel: {storeConfig.phone_number}</div>
+              <div className="print-header-sub text-sm font-black text-black mt-0.5">
                 M-PESA TILL: {storeConfig.till_number}
               </div>
             </div>
 
             {/* Meta Details */}
-            <div className="print-meta py-2.5 border-b-2 border-dashed border-black text-xs font-bold space-y-1 text-black">
+            <div className="print-meta py-2.5 border-b-2 border-dashed border-black text-sm font-extrabold space-y-1 text-black">
               <div className="flex justify-between">
                 <span>Date:</span>
                 <span className="font-mono">{formattedDate}</span>
