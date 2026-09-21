@@ -15,41 +15,65 @@ export interface User {
   has_changed_initial_password?: boolean;
 }
 
-export const ROLE_DETAILS: Record<UserRole, { label: string; description: string; canAddProductsAndPrices: boolean; color: string }> = {
+export const ROLE_DETAILS: Record<
+  UserRole,
+  {
+    label: string;
+    description: string;
+    canAddProductsAndPrices: boolean;
+    canDirectlyAlterStock: boolean;
+    canRestockViaReceipt: boolean;
+    color: string;
+  }
+> = {
   ADMIN: {
     label: 'Administrator',
-    description: 'Master access: Sole authority to add new products, set selling prices, manage staff & configure store.',
+    description: 'Master access: Sole authority to add new products, set selling prices, directly alter stock, manage staff & configure store.',
     canAddProductsAndPrices: true,
+    canDirectlyAlterStock: true,
+    canRestockViaReceipt: true,
     color: 'amber',
   },
   SUPERVISOR: {
     label: 'Supervisor',
-    description: 'Floor & inventory oversight, stock count audits & restock. Cannot add products or change prices.',
+    description: 'Floor & inventory oversight, stock count audits & direct restock. Cannot add products or change prices.',
     canAddProductsAndPrices: false,
+    canDirectlyAlterStock: true,
+    canRestockViaReceipt: true,
     color: 'indigo',
   },
   ACCOUNTANT: {
     label: 'Accountant',
-    description: 'Financial reconciliations, sales auditing, M-Pesa/Cash reporting. Cannot add products or change prices.',
+    description: 'Financial reconciliations, sales auditing, M-Pesa/Cash reporting. Cannot directly alter stock or change prices.',
     canAddProductsAndPrices: false,
+    canDirectlyAlterStock: false,
+    canRestockViaReceipt: false,
     color: 'sky',
   },
   SALES_CASHIER: {
     label: 'Sales Cashier',
-    description: 'Fast POS terminal sales, barcode scanning, cart & receipts. Cannot add products or change prices.',
+    description: 'POS register sales, barcode scanning, cart & receipts. Cannot directly alter stock. Can scan supplier receipts to add stock, set selling prices, and confirm additions.',
     canAddProductsAndPrices: false,
+    canDirectlyAlterStock: false,
+    canRestockViaReceipt: true,
     color: 'emerald',
   },
   SALES: {
     label: 'Sales Cashier',
-    description: 'Fast POS terminal sales, barcode scanning, cart & receipts. Cannot add products or change prices.',
+    description: 'POS register sales, barcode scanning, cart & receipts. Cannot directly alter stock. Can scan supplier receipts to add stock, set selling prices, and confirm additions.',
     canAddProductsAndPrices: false,
+    canDirectlyAlterStock: false,
+    canRestockViaReceipt: true,
     color: 'emerald',
   },
 };
 
 export function getRoleLabel(role: UserRole): string {
   return ROLE_DETAILS[role]?.label || role;
+}
+
+export function isManagerRole(role: UserRole): boolean {
+  return role === 'ADMIN' || role === 'SUPERVISOR' || role === 'ACCOUNTANT';
 }
 
 export interface Category {
@@ -290,4 +314,121 @@ export interface LocalBackupData {
     backup_tool: string;
   };
 }
+
+// =========================================================================
+// SHIFTS & CASH ADJUSTMENTS (SHIFT AUDIT & CASH DRAWER MANAGEMENT)
+// =========================================================================
+export type ShiftStatus = 'OPEN' | 'CLOSED';
+
+export type CashAdjustmentType = 'CASH_IN' | 'CASH_OUT';
+
+export type CashAdjustmentCategory =
+  | 'FLOAT_ADDITION' // Cash float added into drawer
+  | 'SAFE_DROP' // Mid-shift cash drop to safe
+  | 'SUPPLIER_PAYOUT' // Payment to supplier/vendor in cash
+  | 'PETTY_EXPENSE' // Shop supplies, staff meal, minor expense
+  | 'BANKING' // Cash taken to bank
+  | 'DRAWER_CORRECTION' // Over/short balance correction
+  | 'OTHER'; // General adjustment
+
+export interface CashAdjustment {
+  id: string; // e.g. "ADJ-1718928123"
+  shift_id: string;
+  type: CashAdjustmentType;
+  category: CashAdjustmentCategory;
+  amount: number; // in KES
+  reason: string;
+  created_at: string; // ISO string
+  created_by_user_id?: number;
+  created_by_name: string;
+  created_by_role: UserRole;
+  authorized_by_manager?: string;
+}
+
+export interface Shift {
+  id: string; // e.g. "SHIFT-20260921-001"
+  shift_number?: number;
+  store_id: string;
+  cashier_id: number;
+  cashier_name: string;
+  manager_id?: number;
+  manager_name?: string;
+  opened_at: string; // ISO string
+  closed_at?: string; // ISO string if closed
+  status: ShiftStatus;
+  opening_float: number; // Opening cash in drawer (e.g. 5,000 KES)
+  closing_cash_actual?: number; // Counted cash at close
+  closing_cash_expected?: number; // Expected cash calculated
+  variance?: number; // actual - expected
+  closing_notes?: string;
+  closed_by_manager?: string;
+}
+
+export interface ShiftMpesaTransaction {
+  sale_id: number;
+  created_at: string;
+  amount: number;
+  mpesa_code?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  cashier_name: string;
+  items_count: number;
+}
+
+export interface ShiftSummaryReport {
+  shift: Shift;
+  period: {
+    start: string;
+    end: string;
+    duration_minutes: number;
+    is_active: boolean;
+  };
+  // Total Sales breakdown
+  sales: {
+    total_amount: number;
+    total_count: number;
+    total_items_sold: number;
+    average_ticket: number;
+    cash_sales_amount: number;
+    cash_sales_count: number;
+    mpesa_sales_amount: number;
+    mpesa_sales_count: number;
+    debt_sales_amount: number;
+    debt_sales_count: number;
+    split_sales_amount: number;
+    split_sales_count: number;
+  };
+  // M-Pesa transactions detail
+  mpesa_transactions: {
+    total_amount: number;
+    count: number;
+    transactions: ShiftMpesaTransaction[];
+  };
+  // Cash adjustments detail
+  cash_adjustments: {
+    total_in: number;
+    total_out: number;
+    net_adjustment: number; // total_in - total_out
+    count: number;
+    items: CashAdjustment[];
+  };
+  // Customer Debt Repayments in cash during this shift
+  debt_repayments: {
+    total_cash: number;
+    total_mpesa: number;
+    count: number;
+  };
+  // Cash Drawer Reconciliation
+  drawer_reconciliation: {
+    opening_float: number;
+    cash_sales: number;
+    cash_debt_collections: number;
+    cash_additions: number;
+    cash_drops_payouts: number;
+    expected_cash_in_drawer: number;
+    actual_counted_cash?: number;
+    variance?: number;
+  };
+}
+
 

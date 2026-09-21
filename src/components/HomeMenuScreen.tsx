@@ -24,6 +24,7 @@ import {
   TrendingUp,
   UserCheck,
   Users,
+  Wallet,
 } from 'lucide-react';
 import {
   CartItem,
@@ -34,6 +35,7 @@ import {
   StoreConfig,
   User,
   getRoleLabel,
+  isManagerRole,
 } from '../types';
 import { LocalDb } from '../lib/storage';
 import { BazuLogo } from './BazuLogo';
@@ -58,6 +60,7 @@ interface HomeMenuScreenProps {
       | 'tabs'
       | 'smart-stock'
       | 'backup'
+      | 'shift-summary'
   ) => void;
   onOpenChangePassword: () => void;
   onLogout: () => void;
@@ -302,7 +305,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           {/* Today's Sales */}
           <div
             onClick={() => onNavigate('summary')}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Today&apos;s Takings</span>
@@ -318,8 +321,8 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
 
           {/* Cash vs M-Pesa */}
           <div
-            onClick={() => onNavigate('summary')}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
+            onClick={() => onNavigate('shift-summary')}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Cash &amp; M-Pesa Split</span>
@@ -335,13 +338,16 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
                 <span className="font-mono font-bold text-slate-900 dark:text-white">KES {stats.todayCashTotal.toLocaleString()}</span>
               </div>
             </div>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Click to view shift audit</p>
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-1 flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              Click to view active shift report
+            </p>
           </div>
 
           {/* Low Stock Warning */}
           <div
             onClick={() => onNavigate('inventory')}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Stock Alerts</span>
@@ -363,7 +369,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
           {/* Outstanding Debts */}
           <div
             onClick={() => onNavigate('customers')}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-4 rounded-xl transition-all cursor-pointer group shadow-xs"
           >
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium">
               <span>Customer Debts</span>
@@ -417,7 +423,12 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
               <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Ready for checkout
               </span>
-              <span className="font-mono text-slate-500 dark:text-slate-400">{stats.totalProducts} items in stock</span>
+              <span className="flex items-center gap-1.5 font-mono text-slate-500 dark:text-slate-400">
+                <kbd className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[10px] border border-amber-500/30">
+                  Ctrl+F
+                </kbd>
+                <span>{stats.totalProducts} items</span>
+              </span>
             </div>
           </div>
 
@@ -429,7 +440,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('inventory');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Package className="w-6 h-6" />
@@ -460,7 +471,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('requisitions');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md relative overflow-hidden"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md relative overflow-hidden"
           >
             <div className="w-12 h-12 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <ClipboardList className="w-6 h-6" />
@@ -495,7 +506,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('customers');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Users className="w-6 h-6" />
@@ -526,7 +537,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('summary');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <TrendingUp className="w-6 h-6" />
@@ -549,6 +560,41 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             </div>
           </div>
 
+          {/* Shift Summary Report & Cash Audit */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigate('shift-summary')}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') onNavigate('shift-summary');
+            }}
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-amber-500/30 hover:border-amber-500/60 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md relative overflow-hidden"
+          >
+            <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors flex items-center gap-2">
+                <span>Shift Summary Report</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
+                  Manager Audit
+                </span>
+              </h4>
+              <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed">
+              Calculate total sales, M-Pesa collections, safe drops &amp; payouts, physical cash
+              drawer variance, and export PDF/Excel audit reports.
+            </p>
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+              <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Active Shift Audit
+              </span>
+              <span className="font-mono font-bold text-slate-700 dark:text-slate-300">Reconciliation Ready</span>
+            </div>
+          </div>
+
           {/* 5. Recent Transactions Journal & Audit */}
           <div
             role="button"
@@ -557,7 +603,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('transactions');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <History className="w-6 h-6" />
@@ -586,7 +632,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('categories');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-teal-500/15 border border-teal-500/30 text-teal-600 dark:text-teal-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Tags className="w-6 h-6" />
@@ -615,7 +661,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('receipts');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Printer className="w-6 h-6" />
@@ -644,7 +690,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('tabs');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Beer className="w-6 h-6" />
@@ -679,7 +725,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('smart-stock');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <Sparkles className="w-6 h-6" />
@@ -707,7 +753,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') onNavigate('backup');
             }}
-            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+            className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
           >
             <div className="w-12 h-12 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
               <HardDrive className="w-6 h-6" />
@@ -736,7 +782,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') onNavigate('users');
               }}
-              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
             >
               <div className="w-12 h-12 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
                 <ShieldCheck className="w-6 h-6" />
@@ -767,7 +813,7 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') onNavigate('store');
               }}
-              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
+              className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 p-5 rounded-2xl transition-all cursor-pointer group shadow-xs hover:shadow-md"
             >
               <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-700/40 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
                 <Store className="w-6 h-6" />

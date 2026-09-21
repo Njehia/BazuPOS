@@ -77,50 +77,76 @@ Return ONLY valid JSON matching this schema:
 
 If crate quantities are listed (e.g., '2 crates of 24'), calculate total bottle units (e.g., 48 bottles). Ensure quantities are positive numbers.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            inlineData: {
-              data: cleanBase64,
-              mimeType: mimeType,
-            },
-          },
-          prompt,
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              items: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    category: { type: Type.STRING },
-                    quantity: { type: Type.NUMBER },
-                    unit: { type: Type.STRING },
-                    cost_price: { type: Type.NUMBER, nullable: true },
-                    selling_price: { type: Type.NUMBER, nullable: true },
-                    barcode: { type: Type.STRING, nullable: true },
-                  },
-                  required: ['name', 'quantity'],
-                },
-              },
-              confidence: { type: Type.STRING },
-              supplier_name: { type: Type.STRING, nullable: true },
-              invoice_number: { type: Type.STRING, nullable: true },
-              notes: { type: Type.STRING, nullable: true },
-            },
-            required: ['items'],
-          },
+      const imagePart = {
+        inlineData: {
+          data: cleanBase64,
+          mimeType: mimeType,
         },
-      });
+      };
 
-      const responseText = response.text || '{}';
-      const parsedData = JSON.parse(responseText);
+      const textPart = {
+        text: prompt,
+      };
+
+      const CANDIDATE_MODELS = [
+        'gemini-3.8-flash',
+        'gemini-3.6-flash',
+        'gemini-flash-latest',
+        'gemini-3.1-flash-lite',
+      ];
+
+      let lastError: any = null;
+      let parsedData: any = null;
+
+      for (const modelName of CANDIDATE_MODELS) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts: [imagePart, textPart] },
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  items: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        category: { type: Type.STRING },
+                        quantity: { type: Type.NUMBER },
+                        unit: { type: Type.STRING },
+                        cost_price: { type: Type.NUMBER, nullable: true },
+                        selling_price: { type: Type.NUMBER, nullable: true },
+                        barcode: { type: Type.STRING, nullable: true },
+                      },
+                      required: ['name', 'quantity'],
+                    },
+                  },
+                  confidence: { type: Type.STRING },
+                  supplier_name: { type: Type.STRING, nullable: true },
+                  invoice_number: { type: Type.STRING, nullable: true },
+                  notes: { type: Type.STRING, nullable: true },
+                },
+                required: ['items'],
+              },
+            },
+          });
+
+          const responseText = response.text || '{}';
+          parsedData = JSON.parse(responseText);
+          lastError = null;
+          break; // Success!
+        } catch (modelErr: any) {
+          console.warn(`Model ${modelName} parse failed, trying next fallback:`, modelErr?.message || modelErr);
+          lastError = modelErr;
+        }
+      }
+
+      if (lastError || !parsedData) {
+        throw lastError || new Error('All Gemini model candidates failed to parse document.');
+      }
 
       return res.json({
         success: true,

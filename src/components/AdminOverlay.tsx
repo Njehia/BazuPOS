@@ -76,6 +76,7 @@ import { exportCustomersExcel, exportCustomersPDF, exportSalesReportExcel, expor
 import { THEME_PRESETS_LIST, applyStoreTheme, getThemeDetails, useThemeMode } from '../lib/theme';
 import { ThemeToggle } from './ThemeToggle';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { ShiftSummaryModal } from './ShiftSummaryModal';
 
 export type AdminTab = 'inventory' | 'requisitions' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
@@ -138,6 +139,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
 
   // Summary & Sales Explorer state
   const [summaryData, setSummaryData] = useState(() => LocalDb.getDailySummary());
+  const [isShiftSummaryOpen, setIsShiftSummaryOpen] = useState(false);
   const [allSales, setAllSales] = useState<Sale[]>(() => LocalDb.getSales());
   const [selectedSalesDate, setSelectedSalesDate] = useState<string>(() => {
     const dates = LocalDb.getAvailableSalesDates();
@@ -934,6 +936,18 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               <span>Store Settings</span>
             </button>
           </div>
+
+          {/* Active Shift Summary Header Trigger */}
+          <button
+            id="admin-shift-summary-top-btn"
+            type="button"
+            onClick={() => setIsShiftSummaryOpen(true)}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
+            title="Active Shift Summary & Cash Drawer Audit"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Active Shift Audit</span>
+          </button>
 
           {/* Prominent Close (X) Button */}
           <button
@@ -1867,6 +1881,16 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                       }`}
                     >
                       All Records
+                    </button>
+                    <button
+                      id="admin-open-shift-summary-btn"
+                      type="button"
+                      onClick={() => setIsShiftSummaryOpen(true)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs shrink-0"
+                      title="Open full Shift Summary Report, M-Pesa breakdown & Cash Drawer adjustments"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      Active Shift Audit
                     </button>
                   </div>
 
@@ -4118,6 +4142,20 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
         <PrintReceiptModule
           storeConfig={storeConfig}
           onClose={() => setIsPrintReceiptModuleOpen(false)}
+        />
+      )}
+
+      {/* ACTIVE SHIFT SUMMARY & CASH AUDIT MODAL */}
+      {isShiftSummaryOpen && (
+        <ShiftSummaryModal
+          isOpen={isShiftSummaryOpen}
+          onClose={() => setIsShiftSummaryOpen(false)}
+          currentUser={currentUser}
+          storeConfig={storeConfig}
+          onShiftClosed={() => {
+            onInventoryChanged();
+            setSummaryData(LocalDb.getDailySummary());
+          }}
         />
       )}
     </div>

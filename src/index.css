@@ -2,6 +2,35 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* High-contrast and autofill text readability in dark mode */
+.dark input,
+.dark textarea,
+.dark select {
+  color-scheme: dark;
+}
+
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark input:-webkit-autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  -webkit-box-shadow: 0 0 0 1000px #0f172a inset !important;
+  box-shadow: 0 0 0 1000px #0f172a inset !important;
+  caret-color: #f59e0b !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: #0f172a;
+  -webkit-box-shadow: 0 0 0 1000px #f8fafc inset;
+  box-shadow: 0 0 0 1000px #f8fafc inset;
+  caret-color: #0f172a;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 @media print {
   /* Hide all app chrome, backdrops, and navigation */
   body * {

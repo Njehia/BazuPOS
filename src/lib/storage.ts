@@ -21,6 +21,13 @@ import {
   TabOrderRound,
   ParsedStockItem,
   LocalBackupData,
+  CashAdjustment,
+  CashAdjustmentType,
+  CashAdjustmentCategory,
+  Shift,
+  ShiftStatus,
+  ShiftSummaryReport,
+  ShiftMpesaTransaction,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -63,6 +70,10 @@ const STORAGE_KEYS = {
   get CUSTOMER_PAYMENTS() { return getStoreKey('bazu_pos_customer_payments'); },
   get REQUISITIONS() { return getStoreKey('bazu_pos_requisitions'); },
   get CUSTOMER_TABS() { return getStoreKey('bazu_pos_customer_tabs'); },
+  get SHIFTS() { return getStoreKey('bazu_pos_shifts'); },
+  get CASH_ADJUSTMENTS() { return getStoreKey('bazu_pos_cash_adjustments'); },
+  get ACTIVE_SHIFT_ID() { return getStoreKey('bazu_pos_active_shift_id'); },
+  get STOCK_UPLOADS() { return getStoreKey('bazu_pos_stock_uploads'); },
 };
 
 export class LocalDb {
@@ -901,6 +912,17 @@ export class LocalDb {
       return { success: false, error: 'Product not found.' };
     }
 
+    // Strict Cashier Stock Protection: Cashiers cannot directly alter stock.
+    // Stock additions must be performed via receipt scanning and upload.
+    if (userRole && (userRole === 'SALES_CASHIER' || userRole === 'SALES')) {
+      if (updates.stock_qty !== undefined && updates.stock_qty !== existing.stock_qty) {
+        return {
+          success: false,
+          error: 'Permission Denied: Cashiers cannot directly alter stock. Stock can only be added by scanning and uploading a receipt.',
+        };
+      }
+    }
+
     if (updates.barcode) {
       const cleanBarcode = updates.barcode.trim();
       if (products.some((p) => p.id !== id && p.barcode === cleanBarcode)) {
@@ -929,11 +951,19 @@ export class LocalDb {
     items: { id: number; addQty: number }[],
     userRole?: UserRole
   ): { success: boolean; count: number; error?: string } {
+    if (userRole && (userRole === 'SALES_CASHIER' || userRole === 'SALES')) {
+      return {
+        success: false,
+        count: 0,
+        error: 'Permission Denied: Cashiers cannot directly alter stock. Stock can only be added by scanning and uploading a receipt.',
+      };
+    }
+
     if (userRole && userRole !== 'ADMIN' && userRole !== 'SUPERVISOR') {
       return {
         success: false,
         count: 0,
-        error: 'Permission Denied: Only Administrator or Supervisor can perform stock replenishments.',
+        error: 'Permission Denied: Only Administrator or Supervisor can perform manual stock replenishments.',
       };
     }
 
@@ -1217,6 +1247,362 @@ export class LocalDb {
       totalItems,
       averageTicket,
       sales: selectedSales,
+    };
+  }
+
+  // ==========================================
+  // SHIFTS & CASH DRAWER AUDITING
+  // ==========================================
+  static getShifts(): Shift[] {
+    const raw = localStorage.getItem(STORAGE_KEYS.SHIFTS);
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw) as Shift[];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveShifts(shifts: Shift[]) {
+    localStorage.setItem(STORAGE_KEYS.SHIFTS, JSON.stringify(shifts));
+    this.notifyListeners();
+  }
+
+  static getActiveShift(currentUser?: User): Shift {
+    const storeId = getActiveStoreId();
+    const shifts = this.getShifts();
+    const activeShiftId = localStorage.getItem(STORAGE_KEYS.ACTIVE_SHIFT_ID);
+
+    let active = shifts.find((s) => s.id === activeShiftId && s.status === 'OPEN');
+    if (!active) {
+      active = shifts.find((s) => s.status === 'OPEN' && s.store_id === storeId);
+    }
+
+    if (active) {
+      return active;
+    }
+
+    // If no open shift exists, initialize an active shift for the active store & cashier
+    // To ensure historical sales today are included if the terminal was running without an explicit shift:
+    const todaySales = this.getSales().filter((s) => {
+      return s && s.created_at && String(s.created_at).slice(0, 10) === new Date().toISOString().slice(0, 10);
+    });
+
+    let openedAt = new Date().toISOString();
+    if (todaySales.length > 0) {
+      const sortedSales = [...todaySales].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+      openedAt = sortedSales[0].created_at;
+    }
+
+    const cashier = currentUser || this.getUsers().find((u) => u.role === 'SALES_CASHIER') || this.getUsers()[0];
+    const newShift: Shift = {
+      id: `SHIFT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`,
+      shift_number: shifts.length + 1,
+      store_id: storeId,
+      cashier_id: cashier?.id || 1,
+      cashier_name: cashier?.name || 'Main Cashier',
+      opened_at: openedAt,
+      status: 'OPEN',
+      opening_float: 5000, // Standard KES 5,000 drawer float default
+    };
+
+    const updated = [newShift, ...shifts];
+    this.saveShifts(updated);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SHIFT_ID, newShift.id);
+    return newShift;
+  }
+
+  static startNewShift(
+    cashier: User,
+    openingFloat: number,
+    managerName?: string
+  ): Shift {
+    const storeId = getActiveStoreId();
+    const shifts = this.getShifts();
+
+    // Close any previous open shift for this store
+    const nowIso = new Date().toISOString();
+    const updatedShifts = shifts.map((s) => {
+      if (s.status === 'OPEN' && s.store_id === storeId) {
+        return {
+          ...s,
+          status: 'CLOSED' as ShiftStatus,
+          closed_at: nowIso,
+          closed_by_manager: managerName || 'Auto-closed on new shift',
+        };
+      }
+      return s;
+    });
+
+    const newShift: Shift = {
+      id: `SHIFT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-4)}`,
+      shift_number: shifts.length + 1,
+      store_id: storeId,
+      cashier_id: cashier.id,
+      cashier_name: cashier.name,
+      manager_name: managerName,
+      opened_at: nowIso,
+      status: 'OPEN',
+      opening_float: Math.max(0, openingFloat),
+    };
+
+    const all = [newShift, ...updatedShifts];
+    this.saveShifts(all);
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SHIFT_ID, newShift.id);
+    return newShift;
+  }
+
+  static updateShiftOpeningFloat(shiftId: string, newFloat: number): void {
+    const shifts = this.getShifts();
+    const updated = shifts.map((s) => {
+      if (s.id === shiftId) {
+        return { ...s, opening_float: Math.max(0, newFloat) };
+      }
+      return s;
+    });
+    this.saveShifts(updated);
+  }
+
+  static closeShift(
+    shiftId: string,
+    actualCountedCash: number,
+    closingNotes?: string,
+    closedByManager?: string
+  ): ShiftSummaryReport {
+    const report = this.getShiftSummaryReport(shiftId);
+    const shifts = this.getShifts();
+    const nowIso = new Date().toISOString();
+
+    const updated = shifts.map((s) => {
+      if (s.id === shiftId) {
+        return {
+          ...s,
+          status: 'CLOSED' as ShiftStatus,
+          closed_at: nowIso,
+          closing_cash_actual: actualCountedCash,
+          closing_cash_expected: report.drawer_reconciliation.expected_cash_in_drawer,
+          variance: actualCountedCash - report.drawer_reconciliation.expected_cash_in_drawer,
+          closing_notes: closingNotes,
+          closed_by_manager: closedByManager,
+        };
+      }
+      return s;
+    });
+
+    this.saveShifts(updated);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SHIFT_ID);
+    return this.getShiftSummaryReport(shiftId);
+  }
+
+  static getCashAdjustments(shiftId?: string): CashAdjustment[] {
+    const raw = localStorage.getItem(STORAGE_KEYS.CASH_ADJUSTMENTS);
+    if (!raw) return [];
+    try {
+      const all = JSON.parse(raw) as CashAdjustment[];
+      if (shiftId) {
+        return all.filter((a) => a.shift_id === shiftId);
+      }
+      return all;
+    } catch {
+      return [];
+    }
+  }
+
+  static saveCashAdjustments(adjustments: CashAdjustment[]) {
+    localStorage.setItem(STORAGE_KEYS.CASH_ADJUSTMENTS, JSON.stringify(adjustments));
+    this.notifyListeners();
+  }
+
+  static addCashAdjustment(
+    adjustment: Omit<CashAdjustment, 'id' | 'created_at'>
+  ): CashAdjustment {
+    const newAdj: CashAdjustment = {
+      ...adjustment,
+      id: `ADJ-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      created_at: new Date().toISOString(),
+    };
+    const all = this.getCashAdjustments();
+    const updated = [newAdj, ...all];
+    this.saveCashAdjustments(updated);
+    return newAdj;
+  }
+
+  static getShiftSummaryReport(shiftId?: string, fallbackUser?: User): ShiftSummaryReport {
+    let shift: Shift;
+    if (shiftId) {
+      const found = this.getShifts().find((s) => s.id === shiftId);
+      shift = found || this.getActiveShift(fallbackUser);
+    } else {
+      shift = this.getActiveShift(fallbackUser);
+    }
+
+    const shiftStart = new Date(shift.opened_at).getTime();
+    const shiftEnd = shift.closed_at ? new Date(shift.closed_at).getTime() : Date.now();
+    const durationMinutes = Math.max(1, Math.round((shiftEnd - shiftStart) / (1000 * 60)));
+
+    // 1. Filter sales occurring within this shift window
+    const allSales = this.getSales();
+    const shiftSales = allSales.filter((s) => {
+      if (!s || !s.created_at) return false;
+      const saleTime = new Date(s.created_at).getTime();
+      return saleTime >= shiftStart && saleTime <= shiftEnd;
+    });
+
+    // Sales totals
+    let totalSalesAmount = 0;
+    let totalItemsSold = 0;
+    let cashSalesAmount = 0;
+    let cashSalesCount = 0;
+    let mpesaSalesAmount = 0;
+    let mpesaSalesCount = 0;
+    let debtSalesAmount = 0;
+    let debtSalesCount = 0;
+    let splitSalesAmount = 0;
+    let splitSalesCount = 0;
+
+    const mpesaTransactions: ShiftMpesaTransaction[] = [];
+
+    shiftSales.forEach((s) => {
+      const amt = Number(s.total_amount) || 0;
+      totalSalesAmount += amt;
+      totalItemsSold += Number(s.items_count) || 0;
+
+      if (s.payment_method === 'CASH') {
+        cashSalesAmount += amt;
+        cashSalesCount++;
+      } else if (s.payment_method === 'MPESA') {
+        mpesaSalesAmount += amt;
+        mpesaSalesCount++;
+        mpesaTransactions.push({
+          sale_id: s.id,
+          created_at: s.created_at,
+          amount: amt,
+          mpesa_code: s.mpesa_code || 'N/A',
+          customer_name: s.customer_name,
+          customer_phone: s.customer_phone,
+          cashier_name: s.cashier_name || shift.cashier_name,
+          items_count: s.items_count || 1,
+        });
+      } else if (s.payment_method === 'DEBT') {
+        debtSalesAmount += amt;
+        debtSalesCount++;
+        if (s.amount_paid && s.amount_paid > 0) {
+          cashSalesAmount += Number(s.amount_paid);
+        }
+      } else if (s.payment_method === 'SPLIT') {
+        splitSalesAmount += amt;
+        splitSalesCount++;
+      }
+    });
+
+    const averageTicket = shiftSales.length > 0 ? Math.round(totalSalesAmount / shiftSales.length) : 0;
+
+    // 2. Customer Debt Repayments made during this shift
+    const allPayments = this.getCustomerPayments();
+    const shiftPayments = allPayments.filter((p) => {
+      if (!p || !p.created_at) return false;
+      const pTime = new Date(p.created_at).getTime();
+      return pTime >= shiftStart && pTime <= shiftEnd;
+    });
+
+    let debtRepaymentsCash = 0;
+    let debtRepaymentsMpesa = 0;
+    shiftPayments.forEach((p) => {
+      const pAmt = Number(p.amount) || 0;
+      if (p.payment_method === 'CASH') {
+        debtRepaymentsCash += pAmt;
+      } else if (p.payment_method === 'MPESA') {
+        debtRepaymentsMpesa += pAmt;
+        mpesaTransactions.push({
+          sale_id: p.id,
+          created_at: p.created_at,
+          amount: pAmt,
+          mpesa_code: p.mpesa_code || 'DEBT-PAY',
+          customer_name: p.customer_name,
+          cashier_name: p.cashier_name || shift.cashier_name,
+          items_count: 1,
+        });
+      }
+    });
+
+    // 3. Cash Adjustments in this shift
+    const adjustments = this.getCashAdjustments(shift.id);
+    let totalCashIn = 0;
+    let totalCashOut = 0;
+
+    adjustments.forEach((adj) => {
+      const amt = Number(adj.amount) || 0;
+      if (adj.type === 'CASH_IN') {
+        totalCashIn += amt;
+      } else if (adj.type === 'CASH_OUT') {
+        totalCashOut += amt;
+      }
+    });
+
+    const netAdjustment = totalCashIn - totalCashOut;
+
+    // 4. Expected Drawer Cash calculation
+    const openingFloat = Number(shift.opening_float) || 0;
+    const expectedDrawerCash = openingFloat + cashSalesAmount + debtRepaymentsCash + totalCashIn - totalCashOut;
+
+    const actualCounted = shift.closing_cash_actual;
+    const variance = actualCounted !== undefined ? actualCounted - expectedDrawerCash : undefined;
+
+    return {
+      shift,
+      period: {
+        start: shift.opened_at,
+        end: shift.closed_at || new Date().toISOString(),
+        duration_minutes: durationMinutes,
+        is_active: shift.status === 'OPEN',
+      },
+      sales: {
+        total_amount: totalSalesAmount,
+        total_count: shiftSales.length,
+        total_items_sold: totalItemsSold,
+        average_ticket: averageTicket,
+        cash_sales_amount: cashSalesAmount,
+        cash_sales_count: cashSalesCount,
+        mpesa_sales_amount: mpesaSalesAmount,
+        mpesa_sales_count: mpesaSalesCount,
+        debt_sales_amount: debtSalesAmount,
+        debt_sales_count: debtSalesCount,
+        split_sales_amount: splitSalesAmount,
+        split_sales_count: splitSalesCount,
+      },
+      mpesa_transactions: {
+        total_amount: mpesaSalesAmount + debtRepaymentsMpesa,
+        count: mpesaTransactions.length,
+        transactions: mpesaTransactions.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ),
+      },
+      cash_adjustments: {
+        total_in: totalCashIn,
+        total_out: totalCashOut,
+        net_adjustment: netAdjustment,
+        count: adjustments.length,
+        items: adjustments.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ),
+      },
+      debt_repayments: {
+        total_cash: debtRepaymentsCash,
+        total_mpesa: debtRepaymentsMpesa,
+        count: shiftPayments.length,
+      },
+      drawer_reconciliation: {
+        opening_float: openingFloat,
+        cash_sales: cashSalesAmount,
+        cash_debt_collections: debtRepaymentsCash,
+        cash_additions: totalCashIn,
+        cash_drops_payouts: totalCashOut,
+        expected_cash_in_drawer: Math.max(0, expectedDrawerCash),
+        actual_counted_cash: actualCounted,
+        variance: variance,
+      },
     };
   }
 
@@ -2271,61 +2657,167 @@ export class LocalDb {
   // =========================================================================
   static applyStockRestock(
     items: ParsedStockItem[],
-    user_name: string
-  ): { success: boolean; updatedCount: number; createdCount: number; error?: string } {
+    user_name: string,
+    userRole?: UserRole
+  ): {
+    success: boolean;
+    updatedCount: number;
+    createdCount: number;
+    totalUnits: number;
+    totalValuationAdded: number;
+    appliedItems: Array<{
+      name: string;
+      category: string;
+      quantityAdded: number;
+      previousStock: number;
+      newStock: number;
+      sellingPrice: number;
+      costPrice?: number;
+      isNewProduct: boolean;
+    }>;
+    error?: string;
+  } {
     const validItems = items.filter((i) => i.status !== 'IGNORED' && i.quantity > 0);
     if (validItems.length === 0) {
-      return { success: false, updatedCount: 0, createdCount: 0, error: 'No confirmed items to restock.' };
+      return {
+        success: false,
+        updatedCount: 0,
+        createdCount: 0,
+        totalUnits: 0,
+        totalValuationAdded: 0,
+        appliedItems: [],
+        error: 'No confirmed items to restock.',
+      };
     }
 
     const currentProducts = this.getProducts();
-    const categories = this.getCategories();
     let updatedCount = 0;
     let createdCount = 0;
+    let totalUnits = 0;
+    let totalValuationAdded = 0;
 
     const productMap = new Map<number, Product>(currentProducts.map((p) => [p.id, p]));
     let maxId = currentProducts.reduce((m, p) => Math.max(m, p.id), 0);
 
+    const appliedItems: Array<{
+      name: string;
+      category: string;
+      quantityAdded: number;
+      previousStock: number;
+      newStock: number;
+      sellingPrice: number;
+      costPrice?: number;
+      isNewProduct: boolean;
+    }> = [];
+
     for (const item of validItems) {
+      const addedQty = Math.max(1, Math.round(item.quantity));
+      totalUnits += addedQty;
+
       if (item.matched_product_id && productMap.has(item.matched_product_id)) {
         const existing = productMap.get(item.matched_product_id)!;
-        const newStock = existing.stock_qty + item.quantity;
+        const prevStock = existing.stock_qty;
+        const newStock = prevStock + addedQty;
+        const setPrice = item.selling_price && item.selling_price > 0 ? item.selling_price : existing.price;
+        
+        totalValuationAdded += addedQty * setPrice;
+
         const updatedProd: Product = {
           ...existing,
           stock_qty: newStock,
-          price: item.selling_price && item.selling_price > 0 ? item.selling_price : existing.price,
+          price: setPrice,
         };
         productMap.set(existing.id, updatedProd);
         updatedCount++;
+
+        appliedItems.push({
+          name: existing.name,
+          category: existing.category,
+          quantityAdded: addedQty,
+          previousStock: prevStock,
+          newStock: newStock,
+          sellingPrice: setPrice,
+          costPrice: item.cost_price,
+          isNewProduct: false,
+        });
       } else {
-        // Create new product
+        // Create new product if needed
         maxId += 1;
         const catKey = (item.category || 'General').toLowerCase().trim();
+        const setPrice = item.selling_price && item.selling_price > 0 ? item.selling_price : 300;
+        
+        totalValuationAdded += addedQty * setPrice;
+
         const newProduct: Product = {
           id: maxId,
           name: item.name.trim(),
           category: (catKey as any) || 'beer',
-          price: item.selling_price && item.selling_price > 0 ? item.selling_price : 300,
-          stock_qty: item.quantity,
+          price: setPrice,
+          stock_qty: addedQty,
           unit: item.unit || 'Bottle',
           barcode: item.barcode || undefined,
           low_stock_threshold: 10,
         };
         productMap.set(maxId, newProduct);
         createdCount++;
+
+        appliedItems.push({
+          name: newProduct.name,
+          category: newProduct.category,
+          quantityAdded: addedQty,
+          previousStock: 0,
+          newStock: addedQty,
+          sellingPrice: setPrice,
+          costPrice: item.cost_price,
+          isNewProduct: true,
+        });
       }
     }
 
     const updatedProductsList = Array.from(productMap.values());
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProductsList));
     CloudDb.batchSetProducts(updatedProductsList);
+
+    // Save stock addition audit history
+    try {
+      const historyRaw = localStorage.getItem(STORAGE_KEYS.STOCK_UPLOADS);
+      const historyList = historyRaw ? JSON.parse(historyRaw) : [];
+      const newEntry = {
+        id: `restock_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        uploaded_at: new Date().toISOString(),
+        uploaded_by_name: user_name,
+        user_role: userRole || 'SALES_CASHIER',
+        total_items: appliedItems.length,
+        total_units: totalUnits,
+        total_valuation: totalValuationAdded,
+        items: appliedItems,
+      };
+      historyList.unshift(newEntry);
+      // Keep last 50 restock audits
+      localStorage.setItem(STORAGE_KEYS.STOCK_UPLOADS, JSON.stringify(historyList.slice(0, 50)));
+    } catch {
+      // Non-blocking history save
+    }
+
     this.notifyListeners();
 
     return {
       success: true,
       updatedCount,
       createdCount,
+      totalUnits,
+      totalValuationAdded,
+      appliedItems,
     };
+  }
+
+  static getStockUploads(): any[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.STOCK_UPLOADS);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   }
 
   static resetDatabase() {

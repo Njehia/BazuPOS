@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   AlertTriangle,
   Banknote,
@@ -58,6 +58,7 @@ import { SmartStockUploadModal } from './SmartStockUploadModal';
 import { LocalBackupModal } from './LocalBackupModal';
 import { BazuLogo } from './BazuLogo';
 import { HomeMenuScreen } from './HomeMenuScreen';
+import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ThemeToggle } from './ThemeToggle';
 
 interface PosTerminalProps {
@@ -82,6 +83,8 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [quickSearchFeedback, setQuickSearchFeedback] = useState<string | null>(null);
 
   // Modals state
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -98,6 +101,8 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   const [activeReceipt, setActiveReceipt] = useState<{ sale: Sale; items: SaleItem[] } | null>(null);
   const [activeUser, setActiveUser] = useState<UserModel>(currentUser);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isShiftSummaryOpen, setIsShiftSummaryOpen] = useState(false);
+  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
 
   // Admin PIN prompt if salesperson tries to open admin
   const [showAdminPinPrompt, setShowAdminPinPrompt] = useState(false);
@@ -147,6 +152,115 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       return matchesSearch && matchesCategory;
     });
   }, [products, searchQuery, selectedCategory]);
+
+  // Keyboard shortcut listener to instantly focus product search bar (Ctrl+F, Cmd+F, F2, or '/')
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if any modal is open
+      const isAnyModalOpen =
+        isCheckoutOpen ||
+        isAdminOpen ||
+        isCustomerTabsOpen ||
+        isSmartStockOpen ||
+        isLocalBackupOpen ||
+        isPrintReceiptModuleOpen ||
+        showAdminPinPrompt ||
+        isChangePasswordOpen ||
+        !!activeReceipt ||
+        !!activeTabForBill ||
+        !!activeTabForSettlement;
+
+      if (isAnyModalOpen) return;
+
+      const target = e.target as HTMLElement | null;
+      const isTypingInField =
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+      const isSearchKeyCombo =
+        ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) ||
+        e.key === 'F2' ||
+        (e.key === '/' && !isTypingInField);
+
+      if (isSearchKeyCombo) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (currentView !== 'pos') {
+          setCurrentView('pos');
+        }
+
+        setTimeout(() => {
+          if (searchInputRef.current) {
+            searchInputRef.current.focus();
+            searchInputRef.current.select();
+          }
+        }, 40);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [
+    currentView,
+    isCheckoutOpen,
+    isAdminOpen,
+    isCustomerTabsOpen,
+    isSmartStockOpen,
+    isLocalBackupOpen,
+    isPrintReceiptModuleOpen,
+    showAdminPinPrompt,
+    isChangePasswordOpen,
+    activeReceipt,
+    activeTabForBill,
+    activeTabForSettlement,
+  ]);
+
+  // Handle Enter key inside search bar to immediately add top matching in-stock product to cart
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const rawQuery = searchQuery.trim();
+      const query = rawQuery.toLowerCase();
+      if (!query) return;
+
+      // 1. Barcode exact match
+      const exactBarcode = products.find(
+        (p) => p.barcode && p.barcode.trim().toLowerCase() === query
+      );
+      if (exactBarcode) {
+        if (exactBarcode.stock_qty > 0) {
+          addToCart(exactBarcode);
+          setQuickSearchFeedback(`+ ${exactBarcode.name}`);
+          setSearchQuery('');
+          setTimeout(() => setQuickSearchFeedback(null), 2000);
+        } else {
+          setQuickSearchFeedback(`Out of stock: ${exactBarcode.name}`);
+          setTimeout(() => setQuickSearchFeedback(null), 2500);
+        }
+        return;
+      }
+
+      // 2. Top matched product from search results
+      const topInStock = filteredProducts.find((p) => p.stock_qty > 0) || filteredProducts[0];
+      if (topInStock) {
+        if (topInStock.stock_qty > 0) {
+          addToCart(topInStock);
+          setQuickSearchFeedback(`+ ${topInStock.name}`);
+          setSearchQuery('');
+          setTimeout(() => setQuickSearchFeedback(null), 2000);
+        } else {
+          setQuickSearchFeedback(`Out of stock: ${topInStock.name}`);
+          setTimeout(() => setQuickSearchFeedback(null), 2500);
+        }
+      } else {
+        setQuickSearchFeedback('No product found');
+        setTimeout(() => setQuickSearchFeedback(null), 2000);
+      }
+    } else if (e.key === 'Escape') {
+      setSearchQuery('');
+      searchInputRef.current?.blur();
+    }
+  };
 
   // Cart actions
   const addToCart = (product: Product) => {
@@ -271,6 +385,28 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
     }
   };
 
+  // Protect unsaved checkout sessions on window/tab close or refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (cart.length > 0 || isCheckoutOpen) {
+        e.preventDefault();
+        e.returnValue = 'You have an active checkout session with items in your cart. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [cart.length, isCheckoutOpen]);
+
+  // Protected Logout Trigger
+  const handleRequestLogout = () => {
+    if (cart.length > 0 || isCheckoutOpen) {
+      setShowLogoutConfirmModal(true);
+    } else {
+      onLogout();
+    }
+  };
+
   const handleHomeNavigate = (
     destination:
       | 'pos'
@@ -286,6 +422,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       | 'tabs'
       | 'smart-stock'
       | 'backup'
+      | 'shift-summary'
   ) => {
     if (destination === 'pos') {
       setCurrentView('pos');
@@ -297,6 +434,8 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       setIsSmartStockOpen(true);
     } else if (destination === 'backup') {
       setIsLocalBackupOpen(true);
+    } else if (destination === 'shift-summary') {
+      setIsShiftSummaryOpen(true);
     } else {
       handleOpenAdmin(destination as AdminTab);
     }
@@ -527,7 +666,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
             cart={cart}
             onNavigate={handleHomeNavigate}
             onOpenChangePassword={() => setIsChangePasswordOpen(true)}
-            onLogout={onLogout}
+            onLogout={handleRequestLogout}
           />
         </div>
       ) : (
@@ -656,6 +795,18 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
                 <span>Admin Tools</span>
               </button>
 
+              {/* Active Shift Summary Header Button */}
+              <button
+                id="header-shift-summary-btn"
+                type="button"
+                onClick={() => setIsShiftSummaryOpen(true)}
+                title="Active Shift Summary & Cash Drawer Audit"
+                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 px-2.5 py-1.5 rounded-lg border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Shift Audit</span>
+              </button>
+
               {/* Current Shift Cashier Display */}
               <div className="text-right hidden sm:block">
                 <p className="text-[10px] text-slate-300 uppercase font-medium tracking-wider">Current Shift</p>
@@ -683,7 +834,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
               {/* Logout Button */}
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={handleRequestLogout}
                 title="Logout & Lock POS Terminal"
                 className="bg-red-500/20 text-red-300 hover:bg-red-500/30 px-3 py-1.5 rounded border border-red-500/30 text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5"
               >
@@ -714,6 +865,23 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
                     <span>{cat.label}</span>
                   </button>
                 ))}
+
+                {/* Quick Search Focus Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    searchInputRef.current?.focus();
+                    searchInputRef.current?.select();
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs whitespace-nowrap bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border border-slate-200 dark:border-slate-700"
+                  title="Focus product search bar (Ctrl+F or /)"
+                >
+                  <Search className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="hidden sm:inline">Search</span>
+                  <kbd className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
+                    Ctrl+F
+                  </kbd>
+                </button>
 
                 {/* Quick Add / Manage Category button for Admin */}
                 {currentUser.role === 'ADMIN' && (
@@ -799,23 +967,43 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
               {/* Bottom Bar: Search Product & Shift Status */}
               <div className="mt-auto p-4 bg-slate-900 dark:bg-slate-950 flex flex-wrap sm:flex-nowrap items-center gap-4 text-white shrink-0 border-t border-slate-800">
                 <div className="flex-1 min-w-[240px]">
-                  <div className="text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-widest">
-                    Search Product
+                  <div className="flex items-center justify-between text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-widest">
+                    <span className="flex items-center gap-1.5">
+                      <Search className="w-3 h-3 text-amber-400" />
+                      <span>Search Product</span>
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] text-amber-400 font-mono font-medium normal-case">
+                      <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">Ctrl+F</kbd>
+                      <span>or</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">/</kbd>
+                      <span className="hidden sm:inline">to focus</span>
+                    </span>
                   </div>
-                  <div className="bg-slate-800 rounded px-3 py-2 flex items-center border border-slate-700 relative">
+                  <div className="bg-slate-800 rounded px-3 py-2 flex items-center border border-slate-700 relative focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/30 transition-all">
                     <span className="text-slate-500 mr-2 text-sm">🔍</span>
                     <input
+                      ref={searchInputRef}
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Type product name or scan barcode..."
+                      onKeyDown={handleSearchKeyDown}
+                      placeholder="Type product name, scan barcode, or press Enter to add... (Ctrl+F)"
                       className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-400 italic focus:outline-none"
                     />
+                    {quickSearchFeedback && (
+                      <span className="absolute right-9 top-1/2 -translate-y-1/2 text-xs font-bold px-2 py-0.5 rounded bg-amber-500 text-slate-950 shadow-sm animate-fade-in pointer-events-none whitespace-nowrap">
+                        {quickSearchFeedback}
+                      </span>
+                    )}
                     {searchQuery && (
                       <button
                         type="button"
-                        onClick={() => setSearchQuery('')}
+                        onClick={() => {
+                          setSearchQuery('');
+                          searchInputRef.current?.focus();
+                        }}
                         className="text-slate-400 hover:text-white text-xs px-1 cursor-pointer"
+                        title="Clear search (Esc)"
                       >
                         ✕
                       </button>
@@ -823,14 +1011,29 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
                   </div>
                 </div>
 
-                <div className="w-auto sm:w-60 shrink-0">
-                  <div className="text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-widest">
-                    Shift Status
+                <div className="w-auto sm:w-64 shrink-0 flex flex-col justify-center">
+                  <div className="flex items-center justify-between text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-wider">
+                    <span>Shift Status</span>
+                    <span className="text-emerald-400 font-mono flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                      ONLINE
+                    </span>
                   </div>
-                  <div className="text-xs text-green-400 font-bold flex items-center gap-2 pt-2 font-mono">
-                    <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse shrink-0"></span>
-                    <span>ONLINE (OFFLINE-FIRST SYNC)</span>
-                  </div>
+                  <button
+                    id="open-shift-summary-footer-btn"
+                    type="button"
+                    onClick={() => setIsShiftSummaryOpen(true)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-between transition-colors group cursor-pointer"
+                    title="View active shift summary report, M-Pesa totals, and cash adjustments"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Clock className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+                      <span className="truncate">Shift Summary Report</span>
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0 font-mono font-bold">
+                      Audit
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1029,7 +1232,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
       {isCustomerTabsOpen && (
         <CustomerTabsModal
           isOpen={isCustomerTabsOpen}
-          onClose={() => setIsCustomerTabsOpen(false)}
+          onClose={() => {
+            setIsCustomerTabsOpen(false);
+            refreshInventory();
+          }}
           cart={cart}
           currentCart={cart}
           currentUser={activeUser}
@@ -1047,7 +1253,10 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
         <TabBillModal
           tab={activeTabForBill}
           storeConfig={storeConfig}
-          onClose={() => setActiveTabForBill(null)}
+          onClose={() => {
+            setActiveTabForBill(null);
+            refreshInventory();
+          }}
           onSettleTab={(tab) => {
             setActiveTabForBill(null);
             setActiveTabForSettlement(tab);
@@ -1060,8 +1269,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
         <SettleTabModal
           tab={activeTabForSettlement}
           storeConfig={storeConfig}
-          cashierName={currentUser.name}
-          onClose={() => setActiveTabForSettlement(null)}
+          cashierName={activeUser?.name || currentUser?.name || 'Cashier'}
+          onClose={() => {
+            setActiveTabForSettlement(null);
+            refreshInventory();
+          }}
           onSettled={(sale, items) => {
             setActiveTabForSettlement(null);
             setActiveReceipt({ sale, items });
@@ -1097,6 +1309,80 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
           }}
           onRestored={() => refreshInventory()}
         />
+      )}
+
+      {/* Shift Summary Report Modal */}
+      {isShiftSummaryOpen && (
+        <ShiftSummaryModal
+          isOpen={isShiftSummaryOpen}
+          onClose={() => setIsShiftSummaryOpen(false)}
+          currentUser={activeUser}
+          storeConfig={storeConfig}
+          onShiftClosed={() => {
+            refreshInventory();
+          }}
+        />
+      )}
+
+      {/* Confirmation Dialog for Active Unsaved Checkout on Logout */}
+      {showLogoutConfirmModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Active Unsaved Checkout Session
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  You currently have <strong className="text-slate-900 dark:text-white">{cart.length} item(s)</strong> ({totalItemsCount} units) totaling{' '}
+                  <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
+                    KES {Math.round(totalAmount).toLocaleString()}
+                  </strong>{' '}
+                  in the register cart. Logging out now will discard these uncompleted checkout items.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-300">
+              Tip: You can <strong>Hold on Customer Tab</strong> to keep this order saved for later without losing it!
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutConfirmModal(false);
+                  setIsCustomerTabsOpen(true);
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Beer className="w-3.5 h-3.5" />
+                Hold on Tab First
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirmModal(false)}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel &amp; Continue
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutConfirmModal(false);
+                  setCart([]);
+                  onLogout();
+                }}
+                className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Discard &amp; Logout
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Admin PIN Prompt if Salesperson clicks Admin */}

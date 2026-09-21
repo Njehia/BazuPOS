@@ -29,15 +29,29 @@ export const SettleTabModal: React.FC<SettleTabModalProps> = ({
   onSettled,
 }) => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
-  const [cashTendered, setCashTendered] = useState<string>(tab.total_amount.toString());
+  const [cashTendered, setCashTendered] = useState<string>((tab.total_amount || 0).toString());
   const [mpesaCode, setMpesaCode] = useState<string>('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | undefined>(tab.customer_id);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const customers = useMemo(() => LocalDb.getCustomers(), []);
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
-  const totalAmount = tab.total_amount;
+  const customers = useMemo(() => {
+    try {
+      return LocalDb.getCustomers() || [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const totalAmount = tab.total_amount || 0;
   const numCashTendered = parseFloat(cashTendered) || 0;
   const changeReturned = Math.max(0, numCashTendered - totalAmount);
 
@@ -90,14 +104,19 @@ export const SettleTabModal: React.FC<SettleTabModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-5 py-4 bg-slate-900 dark:bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div>
             <h2 className="text-base sm:text-lg font-bold">Settle Customer Tab</h2>
             <p className="text-xs text-slate-400">
-              {tab.tab_name} • {tab.total_items_count} items across {tab.rounds.length} rounds
+              {tab.tab_name} • {tab.total_items_count || 0} items across {(tab.rounds || []).length} rounds
             </p>
           </div>
 
@@ -263,7 +282,7 @@ export const SettleTabModal: React.FC<SettleTabModalProps> = ({
                   <option value="">-- Choose Registered Customer --</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.phone}) - Current Debt: KES {c.current_debt.toLocaleString()}
+                      {c.name} ({c.phone}) - Current Debt: KES {(c.current_debt || 0).toLocaleString()}
                     </option>
                   ))}
                 </select>

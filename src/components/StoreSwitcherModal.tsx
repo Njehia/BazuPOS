@@ -137,7 +137,7 @@ export const StoreSwitcherModal: React.FC<StoreSwitcherModalProps> = ({
                       className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between group ${
                         isActive
                           ? 'border-amber-500 bg-amber-500/10 shadow-sm'
-                          : 'border-slate-200 dark:border-slate-800 hover:border-amber-500/50 bg-white dark:bg-slate-850'
+                          : 'border-slate-200 dark:border-slate-800 hover:border-amber-500/50 bg-white dark:bg-slate-900'
                       }`}
                     >
                       <div className="flex items-center gap-3">

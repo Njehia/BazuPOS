@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import { Category, CustomerSummary, Product, Requisition, Sale, SaleItem, StoreConfig } from '../types';
+import { Category, CustomerSummary, Product, Requisition, Sale, SaleItem, StoreConfig, ShiftSummaryReport } from '../types';
 import { getThemeDetails } from './theme';
 import { maskPhoneNumber } from './phoneUtils';
 
@@ -927,4 +927,303 @@ export function exportRequisitionExcel(req: Requisition, storeConfig: StoreConfi
   XLSX.utils.book_append_sheet(wb, ws, req.requisition_no);
   XLSX.writeFile(wb, `${req.requisition_no}_${storeConfig.store_name.replace(/\s+/g, '_')}.xlsx`);
 }
+
+// =========================================================================
+// SHIFT SUMMARY REPORT EXPORTS (PDF & EXCEL)
+// =========================================================================
+
+export function exportShiftReportPDF(report: ShiftSummaryReport, storeConfig: StoreConfig): void {
+  const { doc, themeRgb, startY } = createStyledDoc(
+    storeConfig,
+    `SHIFT AUDIT & CASH RECONCILIATION: ${report.shift.id}`,
+    `Cashier: ${report.shift.cashier_name} | Status: ${report.shift.status}`
+  );
+
+  const formatKes = (val: number) => `KES ${Math.round(val).toLocaleString()}`;
+  const startDateStr = new Date(report.period.start).toLocaleString('en-KE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  const endDateStr = report.shift.closed_at
+    ? new Date(report.shift.closed_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Still Active (Live Session)';
+
+  // Metadata block
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Shift Started: ${startDateStr}`, 14, startY + 2);
+  doc.text(`Shift Ended: ${endDateStr}`, 14, startY + 7);
+  doc.text(`Duration: ${Math.floor(report.period.duration_minutes / 60)}h ${report.period.duration_minutes % 60}m`, 110, startY + 2);
+  doc.text(`Cashier: ${report.shift.cashier_name} ${report.shift.manager_name ? `• Manager: ${report.shift.manager_name}` : ''}`, 110, startY + 7);
+
+  // Key KPI summary box
+  const boxY = startY + 12;
+  const colW = 35;
+  const kpis = [
+    { label: 'TOTAL SALES', value: formatKes(report.sales.total_amount), sub: `${report.sales.total_count} Orders` },
+    { label: 'M-PESA TOTAL', value: formatKes(report.mpesa_transactions.total_amount), sub: `${report.mpesa_transactions.count} Payments` },
+    { label: 'CASH SALES', value: formatKes(report.sales.cash_sales_amount), sub: `${report.sales.cash_sales_count} Transactions` },
+    { label: 'NET CASH ADJ', value: formatKes(report.cash_adjustments.net_adjustment), sub: `+${formatKes(report.cash_adjustments.total_in)} / -${formatKes(report.cash_adjustments.total_out)}` },
+    { label: 'DRAWER EXPECTED', value: formatKes(report.drawer_reconciliation.expected_cash_in_drawer), sub: `Opening Float: ${formatKes(report.drawer_reconciliation.opening_float)}` },
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const x = 14 + idx * (colW + 2);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(x, boxY, colW, 18, 1.5, 1.5, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(x, boxY, colW, 18, 1.5, 1.5, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.label, x + 2.5, boxY + 4.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(kpi.value, x + 2.5, boxY + 10.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.sub, x + 2.5, boxY + 15);
+  });
+
+  // Table 1: Cash Drawer Balance & Reconciliation
+  const reconRows = [
+    ['Opening Cash Float (Drawer Start)', formatKes(report.drawer_reconciliation.opening_float), 'Initial float cash in till'],
+    ['(+) Counter Cash Sales', formatKes(report.drawer_reconciliation.cash_sales), `${report.sales.cash_sales_count} cash sales collected`],
+    ['(+) Cash Debt Repayments Collected', formatKes(report.drawer_reconciliation.cash_debt_collections), `${report.debt_repayments.count} customer ledger payments`],
+    ['(+) Cash In Adjustments (Top-ups / In)', formatKes(report.drawer_reconciliation.cash_additions), `${report.cash_adjustments.items.filter(i => i.type === 'CASH_IN').length} addition records`],
+    ['(-) Cash Out Adjustments (Drops / Payouts)', `-${formatKes(report.drawer_reconciliation.cash_drops_payouts)}`, `${report.cash_adjustments.items.filter(i => i.type === 'CASH_OUT').length} payouts & drops`],
+    ['(=) EXPECTED PHYSICAL CASH IN DRAWER', formatKes(report.drawer_reconciliation.expected_cash_in_drawer), 'Expected cash calculated at register'],
+  ];
+
+  if (report.drawer_reconciliation.actual_counted_cash !== undefined) {
+    reconRows.push([
+      'Actual Cash Counted at Close',
+      formatKes(report.drawer_reconciliation.actual_counted_cash),
+      'Physical cash verified by manager',
+    ]);
+    const varianceVal = report.drawer_reconciliation.variance || 0;
+    reconRows.push([
+      varianceVal >= 0 ? 'Cash Surplus (Over)' : 'Cash Shortage (Short)',
+      formatKes(Math.abs(varianceVal)),
+      varianceVal === 0 ? 'PERFECT BALANCED' : varianceVal > 0 ? 'SURPLUS (+)' : 'SHORTAGE (-)',
+    ]);
+  }
+
+  autoTable(doc, {
+    startY: boxY + 23,
+    head: [['Cash Drawer Item / Stream', 'Amount (KES)', 'Audit Notes & Breakdown']],
+    body: reconRows,
+    theme: 'grid',
+    headStyles: {
+      fillColor: themeRgb,
+      textColor: [255, 255, 255],
+      fontSize: 8,
+      fontStyle: 'bold',
+    },
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 2,
+    },
+    columnStyles: {
+      0: { cellWidth: 80, fontStyle: 'bold' },
+      1: { cellWidth: 35, halign: 'right', fontStyle: 'bold' },
+      2: { cellWidth: 67 },
+    },
+  });
+
+  // Table 2: Cash Adjustments (Drops & Additions)
+  const lastY = (doc as any).lastAutoTable.finalY || 120;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`CASH ADJUSTMENTS & DROPS (${report.cash_adjustments.count})`, 14, lastY + 8);
+
+  const adjRows = report.cash_adjustments.items.map((adj, idx) => [
+    idx + 1,
+    new Date(adj.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }),
+    adj.type === 'CASH_IN' ? 'CASH IN (+)' : 'CASH OUT (-)',
+    adj.category.replace(/_/g, ' '),
+    formatKes(adj.amount),
+    adj.reason,
+    adj.created_by_name,
+    adj.authorized_by_manager || '-',
+  ]);
+
+  if (adjRows.length === 0) {
+    adjRows.push(['-', '-', 'NONE', 'No cash adjustments recorded during this shift', 'KES 0', '-', '-', '-']);
+  }
+
+  autoTable(doc, {
+    startY: lastY + 11,
+    head: [['#', 'Time', 'Type', 'Category', 'Amount', 'Reason / Description', 'Staff', 'Manager Auth']],
+    body: adjRows,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [71, 85, 105],
+      textColor: [255, 255, 255],
+      fontSize: 7.5,
+      fontStyle: 'bold',
+    },
+    styles: {
+      fontSize: 7,
+      cellPadding: 1.8,
+    },
+    columnStyles: {
+      0: { cellWidth: 7, halign: 'center' },
+      1: { cellWidth: 16 },
+      2: { cellWidth: 20, fontStyle: 'bold' },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
+      5: { cellWidth: 44 },
+      6: { cellWidth: 22 },
+      7: { cellWidth: 23 },
+    },
+  });
+
+  // Table 3: M-Pesa Transactions Audit
+  const mpesaTableY = (doc as any).lastAutoTable.finalY || 180;
+  if (mpesaTableY > 230) {
+    doc.addPage();
+  }
+  const currentY = mpesaTableY > 230 ? 20 : mpesaTableY + 8;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`M-PESA TRANSACTIONS AUDIT (${report.mpesa_transactions.count} Total: ${formatKes(report.mpesa_transactions.total_amount)})`, 14, currentY);
+
+  const mpesaRows = report.mpesa_transactions.transactions.slice(0, 30).map((tx, idx) => [
+    idx + 1,
+    new Date(tx.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }),
+    tx.sale_id ? `ORD-${tx.sale_id}` : 'DEBT-PAY',
+    tx.mpesa_code || 'N/A',
+    tx.customer_name || 'Walk-in Customer',
+    tx.cashier_name,
+    formatKes(tx.amount),
+  ]);
+
+  if (mpesaRows.length === 0) {
+    mpesaRows.push(['-', '-', '-', 'No M-Pesa payments recorded during this shift', '-', '-', 'KES 0']);
+  }
+
+  autoTable(doc, {
+    startY: currentY + 3,
+    head: [['#', 'Time', 'Ref #', 'M-Pesa Code', 'Customer', 'Cashier', 'Amount (KES)']],
+    body: mpesaRows,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [22, 101, 52], // Green-800 for M-Pesa
+      textColor: [255, 255, 255],
+      fontSize: 7.5,
+      fontStyle: 'bold',
+    },
+    styles: {
+      fontSize: 7,
+      cellPadding: 1.8,
+    },
+    columnStyles: {
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 18 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 32, fontStyle: 'bold' },
+      4: { cellWidth: 46 },
+      5: { cellWidth: 26 },
+      6: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+    },
+  });
+
+  addDocFooters(doc, storeConfig, themeRgb);
+  doc.save(`shift_summary_${report.shift.id}_${storeConfig.store_name.replace(/\s+/g, '_')}.pdf`);
+}
+
+export function exportShiftReportExcel(report: ShiftSummaryReport, storeConfig: StoreConfig): void {
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Shift Executive Summary & Cash Drawer
+  const formatKesNum = (val: number) => Math.round(val);
+  const summaryRows = [
+    [storeConfig.store_name.toUpperCase(), ''],
+    [`Branch: ${storeConfig.branch} | Till: ${storeConfig.till_number} | Phone: ${storeConfig.phone_number}`, ''],
+    [`SHIFT SUMMARY AUDIT REPORT: ${report.shift.id}`, ''],
+    [`Status: ${report.shift.status} | Cashier: ${report.shift.cashier_name} | Manager: ${report.shift.manager_name || 'N/A'}`, ''],
+    [`Period: ${new Date(report.period.start).toLocaleString('en-KE')} to ${report.shift.closed_at ? new Date(report.shift.closed_at).toLocaleString('en-KE') : 'ACTIVE'}`, ''],
+    [],
+    ['KEY SHIFT TOTALS', 'AMOUNT (KES)', 'NOTES'],
+    ['Total Gross Sales', formatKesNum(report.sales.total_amount), `${report.sales.total_count} Orders / ${report.sales.total_items_sold} Items`],
+    ['Cash Counter Sales', formatKesNum(report.sales.cash_sales_amount), `${report.sales.cash_sales_count} Transactions`],
+    ['M-Pesa Mobile Money Sales', formatKesNum(report.sales.mpesa_sales_amount), `${report.sales.mpesa_sales_count} Transactions`],
+    ['Customer Debt / Credit Sales', formatKesNum(report.sales.debt_sales_amount), `${report.sales.debt_sales_count} Transactions`],
+    ['Customer Debt Repayments (Cash)', formatKesNum(report.debt_repayments.total_cash), 'Collected at register'],
+    ['Customer Debt Repayments (M-Pesa)', formatKesNum(report.debt_repayments.total_mpesa), 'Paid via M-Pesa'],
+    ['Average Sale Ticket', formatKesNum(report.sales.average_ticket), 'Average revenue per transaction'],
+    [],
+    ['CASH DRAWER RECONCILIATION', 'AMOUNT (KES)', 'FORMULA / AUDIT NOTE'],
+    ['Opening Cash Float', formatKesNum(report.drawer_reconciliation.opening_float), 'Starting cash in till drawer'],
+    ['(+) Counter Cash Sales', formatKesNum(report.drawer_reconciliation.cash_sales), 'Cash received for sales'],
+    ['(+) Cash Debt Repayments', formatKesNum(report.drawer_reconciliation.cash_debt_collections), 'Customer debt payments in cash'],
+    ['(+) Cash In Additions', formatKesNum(report.drawer_reconciliation.cash_additions), 'Float top-ups & petty cash additions'],
+    ['(-) Cash Drops & Payouts', -formatKesNum(report.drawer_reconciliation.cash_drops_payouts), 'Safe drops & vendor payouts'],
+    ['(=) EXPECTED PHYSICAL CASH IN DRAWER', formatKesNum(report.drawer_reconciliation.expected_cash_in_drawer), 'Expected balance calculated'],
+    ['Actual Cash Counted', report.drawer_reconciliation.actual_counted_cash !== undefined ? formatKesNum(report.drawer_reconciliation.actual_counted_cash) : 'NOT YET COUNTED', 'Manager physical count at close'],
+    ['Cash Discrepancy / Variance', report.drawer_reconciliation.variance !== undefined ? formatKesNum(report.drawer_reconciliation.variance) : 'N/A', report.drawer_reconciliation.variance === 0 ? 'BALANCED' : 'SHORT / OVER'],
+  ];
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary['!cols'] = [{ wch: 36 }, { wch: 18 }, { wch: 40 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Shift Summary');
+
+  // Sheet 2: M-Pesa Transactions
+  const mpesaHeader = [
+    ['M-PESA TRANSACTIONS AUDIT', ''],
+    [`Total Volume: KES ${report.mpesa_transactions.total_amount.toLocaleString()} | Count: ${report.mpesa_transactions.count}`, ''],
+    [],
+    ['#', 'Date & Time', 'Order / Ref #', 'M-Pesa Confirmation Code', 'Customer Name', 'Cashier', 'Amount (KES)'],
+  ];
+
+  const mpesaRows = report.mpesa_transactions.transactions.map((tx, idx) => [
+    idx + 1,
+    new Date(tx.created_at).toLocaleString('en-KE'),
+    tx.sale_id ? `ORD-${tx.sale_id}` : 'DEBT-PAY',
+    tx.mpesa_code || 'N/A',
+    tx.customer_name || 'Walk-in Customer',
+    tx.cashier_name,
+    formatKesNum(tx.amount),
+  ]);
+
+  const wsMpesa = XLSX.utils.aoa_to_sheet([...mpesaHeader, ...mpesaRows]);
+  wsMpesa['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 16 }, { wch: 26 }, { wch: 28 }, { wch: 18 }, { wch: 16 }];
+  XLSX.utils.book_append_sheet(wb, wsMpesa, 'M-Pesa Transactions');
+
+  // Sheet 3: Cash Adjustments
+  const adjHeader = [
+    ['CASH ADJUSTMENTS AUDIT (DROPS & ADDITIONS)', ''],
+    [`Total Cash In: KES ${report.cash_adjustments.total_in.toLocaleString()} | Total Cash Out: KES ${report.cash_adjustments.total_out.toLocaleString()}`, ''],
+    [],
+    ['#', 'Date & Time', 'Type', 'Category', 'Amount (KES)', 'Reason / Description', 'Created By', 'Manager Approved'],
+  ];
+
+  const adjRows = report.cash_adjustments.items.map((adj, idx) => [
+    idx + 1,
+    new Date(adj.created_at).toLocaleString('en-KE'),
+    adj.type,
+    adj.category,
+    formatKesNum(adj.amount),
+    adj.reason,
+    adj.created_by_name,
+    adj.authorized_by_manager || 'None',
+  ]);
+
+  const wsAdj = XLSX.utils.aoa_to_sheet([...adjHeader, ...adjRows]);
+  wsAdj['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 34 }, { wch: 18 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(wb, wsAdj, 'Cash Adjustments');
+
+  XLSX.writeFile(wb, `shift_report_${report.shift.id}_${storeConfig.store_name.replace(/\s+/g, '_')}.xlsx`);
+}
+
 

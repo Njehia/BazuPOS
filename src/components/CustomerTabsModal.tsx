@@ -63,8 +63,22 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
   const effectiveCashierName = cashierName || currentUser?.name || 'Cashier';
   const handleBillSlip = onOpenBill || onPrintTabBill;
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const [activeTabSubView, setActiveTabSubView] = useState<'OPEN' | 'ADD_CART' | 'HISTORY'>('OPEN');
-  const [tabs, setTabs] = useState<CustomerTab[]>(() => LocalDb.getCustomerTabs());
+  const [tabs, setTabs] = useState<CustomerTab[]>(() => {
+    try {
+      return LocalDb.getCustomerTabs() || [];
+    } catch {
+      return [];
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedTabId, setExpandedTabId] = useState<string | null>(null);
 
@@ -190,7 +204,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
     refreshTabs();
     setActiveTabSubView('OPEN');
     setSuccessMsg(
-      `Added ${cartUnits} items to Tab "${tab.tab_name}". Total is now KES ${result.tab?.total_amount.toLocaleString()}.`
+      `Added ${cartUnits} items to Tab "${tab.tab_name}". Total is now KES ${(result.tab?.total_amount || 0).toLocaleString()}.`
     );
     setTimeout(() => setSuccessMsg(null), 4000);
   };
@@ -213,7 +227,12 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Top Header */}
         <div className="px-5 py-4 bg-slate-900 dark:bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
@@ -369,7 +388,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                       ? 'When a customer orders multiple drinks throughout their visit, you can hold their orders here until they are ready to clear their tab.'
                       : 'Try searching with a different table number or customer name.'}
                   </p>
-                  {cart.length > 0 && (
+                  {effectiveCart.length > 0 && (
                     <button
                       type="button"
                       onClick={() => setActiveTabSubView('ADD_CART')}
@@ -384,10 +403,11 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {filteredOpenTabs.map((tab) => {
                     const isExpanded = expandedTabId === tab.id;
-                    const openedDate = new Date(tab.opened_at);
+                    const openedDate = new Date(tab.opened_at || Date.now());
                     const timeAgoMinutes = Math.round(
-                      (Date.now() - openedDate.getTime()) / (1000 * 60)
+                      (Date.now() - (isNaN(openedDate.getTime()) ? Date.now() : openedDate.getTime())) / (1000 * 60)
                     );
+                    const roundsList = tab.rounds || [];
 
                     return (
                       <div
@@ -401,7 +421,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                                 {tab.tab_name}
                               </h3>
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold">
-                                {tab.rounds.length} {tab.rounds.length === 1 ? 'Round' : 'Rounds'}
+                                {roundsList.length} {roundsList.length === 1 ? 'Round' : 'Rounds'}
                               </span>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
@@ -409,9 +429,9 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                                 <Clock className="w-3 h-3" />
                                 {timeAgoMinutes < 1
                                   ? 'Just opened'
-                                  : `${timeAgoMinutes}m ago (${openedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`}
+                                  : `${timeAgoMinutes}m ago (${isNaN(openedDate.getTime()) ? '' : openedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`}
                               </span>
-                              <span>• By {tab.opened_by_cashier}</span>
+                              <span>• By {tab.opened_by_cashier || 'Cashier'}</span>
                             </div>
                           </div>
 
@@ -420,7 +440,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                               Tab Total
                             </span>
                             <span className="text-base font-black text-slate-950 dark:text-white font-mono">
-                              KES {tab.total_amount.toLocaleString()}
+                              KES {(tab.total_amount || 0).toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -453,7 +473,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                             className="w-full py-1 text-left flex items-center justify-between text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-semibold cursor-pointer"
                           >
                             <span>
-                              {tab.total_items_count} {tab.total_items_count === 1 ? 'drink' : 'drinks'} in tab
+                              {tab.total_items_count || 0} {(tab.total_items_count === 1) ? 'drink' : 'drinks'} in tab
                             </span>
                             <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 text-[11px]">
                               {isExpanded ? 'Hide Details' : 'View Rounds'}
@@ -463,22 +483,22 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
 
                           {isExpanded && (
                             <div className="mt-2 space-y-2.5 bg-white dark:bg-slate-900 rounded-xl p-3 border border-slate-200 dark:border-slate-700 text-xs">
-                              {tab.rounds.map((round) => (
+                              {roundsList.map((round) => (
                                 <div key={round.id} className="border-b border-slate-100 dark:border-slate-800 pb-2 last:border-none last:pb-0">
                                   <div className="flex items-center justify-between font-bold text-[11px] text-slate-700 dark:text-slate-300 mb-1">
                                     <span className="uppercase text-amber-600 dark:text-amber-400">
-                                      Round #{round.round_number} ({new Date(round.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                                      Round #{round.round_number} ({new Date(round.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
                                     </span>
-                                    <span className="font-mono">KES {round.round_total.toLocaleString()}</span>
+                                    <span className="font-mono">KES {(round.round_total || 0).toLocaleString()}</span>
                                   </div>
                                   <div className="space-y-1 pl-2">
-                                    {round.items.map((item, idx) => (
+                                    {(round.items || []).map((item, idx) => (
                                       <div key={idx} className="flex justify-between text-[11px] text-slate-600 dark:text-slate-400">
                                         <span>
-                                          {item.quantity}× {item.product.name}
+                                          {item.quantity}× {item.product?.name || 'Item'}
                                         </span>
                                         <span className="font-mono">
-                                          KES {(item.product.price * item.quantity).toLocaleString()}
+                                          KES {(((item.product?.price || 0) * (item.quantity || 0))).toLocaleString()}
                                         </span>
                                       </div>
                                     ))}
@@ -516,7 +536,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
 
                           <div className="flex items-center gap-1.5">
                             {/* Add Cart to Tab if Cart has items */}
-                            {cart.length > 0 && (
+                            {effectiveCart.length > 0 && (
                               <button
                                 type="button"
                                 onClick={() => handleAddCartToExistingTab(tab)}
@@ -538,7 +558,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                               className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
                             >
                               <Banknote className="w-3.5 h-3.5" />
-                              <span>Settle Tab (KES {tab.total_amount.toLocaleString()})</span>
+                              <span>Settle Tab (KES {(tab.total_amount || 0).toLocaleString()})</span>
                             </button>
                           </div>
                         </div>
@@ -560,7 +580,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                     Current POS Cart Order
                   </h4>
                   <p className="text-sm font-extrabold text-slate-900 dark:text-white mt-0.5">
-                    {cart.length === 0
+                    {effectiveCart.length === 0
                       ? 'No items in cart (Opening an empty tab for later orders)'
                       : `${cartUnits} items ready to be held on tab`}
                   </p>
@@ -574,7 +594,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
               </div>
 
               {/* Choose Existing Tab Option */}
-              {openTabs.length > 0 && cart.length > 0 && (
+              {openTabs.length > 0 && effectiveCart.length > 0 && (
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
                   <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-2">
                     Or Append to an Existing Open Tab:
@@ -592,7 +612,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                             {t.tab_name}
                           </p>
                           <p className="text-[10px] text-slate-400">
-                            {t.rounds.length} rounds • KES {t.total_amount.toLocaleString()}
+                            {(t.rounds || []).length} rounds • KES {(t.total_amount || 0).toLocaleString()}
                           </p>
                         </div>
                         <span className="text-xs font-bold text-amber-600 dark:text-amber-400 shrink-0 ml-2">
@@ -641,7 +661,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                         <option value="">-- No linked customer (Casual Guest) --</option>
                         {customers.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name} ({c.phone}) - Current Debt: KES {c.current_debt.toLocaleString()}
+                            {c.name} ({c.phone}) - Current Debt: KES {(c.current_debt || 0).toLocaleString()}
                           </option>
                         ))}
                       </select>
@@ -676,7 +696,7 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                   >
                     <Beer className="w-4 h-4" />
                     <span>
-                      {cart.length > 0
+                      {effectiveCart.length > 0
                         ? `Confirm & Hold ${cartUnits} Drinks on Tab`
                         : 'Open Empty Tab'}
                     </span>
@@ -734,14 +754,14 @@ export const CustomerTabsModal: React.FC<CustomerTabsModalProps> = ({
                           )}
                         </div>
                         <p className="text-[11px] text-slate-400 mt-0.5">
-                          {tab.rounds.length} rounds • {tab.total_items_count} items • Closed by {tab.closed_by_cashier || 'Cashier'}{' '}
+                          {(tab.rounds || []).length} rounds • {tab.total_items_count || 0} items • Closed by {tab.closed_by_cashier || 'Cashier'}{' '}
                           {tab.closed_at ? `on ${new Date(tab.closed_at).toLocaleDateString()} ${new Date(tab.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-3">
                         <span className="font-black text-slate-900 dark:text-white font-mono text-sm">
-                          KES {tab.total_amount.toLocaleString()}
+                          KES {(tab.total_amount || 0).toLocaleString()}
                         </span>
                         {tab.status === 'SETTLED' && handleBillSlip && (
                           <button

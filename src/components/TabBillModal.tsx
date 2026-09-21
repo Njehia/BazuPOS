@@ -18,39 +18,49 @@ export const TabBillModal: React.FC<TabBillModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handlePrint = () => {
     window.print();
   };
 
-  const openedDate = new Date(tab.opened_at).toLocaleString('en-KE', {
+  const openedDate = new Date(tab.opened_at || Date.now()).toLocaleString('en-KE', {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
 
+  const roundsList = tab.rounds || [];
+
   const handleCopyText = () => {
     const divider = '--------------------------------';
     const lines = [
-      storeConfig.store_name.toUpperCase(),
-      storeConfig.branch,
-      `Tel: ${storeConfig.phone_number}`,
-      `Till: ${storeConfig.till_number}`,
+      (storeConfig.store_name || 'BAZU POS').toUpperCase(),
+      storeConfig.branch || '',
+      `Tel: ${storeConfig.phone_number || ''}`,
+      `Till: ${storeConfig.till_number || ''}`,
       divider,
       `TAB BILL / CHECK (INTERIM)`,
-      `Tab: ${tab.tab_name.toUpperCase()}`,
+      `Tab: ${(tab.tab_name || '').toUpperCase()}`,
       `Opened: ${openedDate}`,
-      `Cashier: ${tab.opened_by_cashier}`,
+      `Cashier: ${tab.opened_by_cashier || 'Cashier'}`,
       tab.customer_name ? `Customer: ${tab.customer_name}` : '',
       divider,
-      ...tab.rounds.flatMap((round) => [
-        `ROUND #${round.round_number} (${new Date(round.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
-        ...round.items.map(
+      ...roundsList.flatMap((round) => [
+        `ROUND #${round.round_number} (${new Date(round.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+        ...(round.items || []).map(
           (it) =>
-            `  ${it.product.name} x${it.quantity} = KES ${(it.product.price * it.quantity).toLocaleString()}`
+            `  ${it.product?.name || 'Item'} x${it.quantity} = KES ${(((it.product?.price || 0) * it.quantity)).toLocaleString()}`
         ),
       ]),
       divider,
-      `TOTAL DRINKS: ${tab.total_items_count}`,
-      `TOTAL BILL: KES ${tab.total_amount.toLocaleString()}`,
+      `TOTAL DRINKS: ${tab.total_items_count || 0}`,
+      `TOTAL BILL: KES ${(tab.total_amount || 0).toLocaleString()}`,
       divider,
       `Please clear at the counter or request M-Pesa Till`,
     ].filter(Boolean);
@@ -61,7 +71,12 @@ export const TabBillModal: React.FC<TabBillModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-xs"
+    >
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-5 py-4 bg-slate-900 dark:bg-slate-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
@@ -71,7 +86,7 @@ export const TabBillModal: React.FC<TabBillModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold">Interim Tab Check (Leta Bill)</h2>
-              <p className="text-xs text-slate-400">{tab.tab_name} • {tab.rounds.length} Rounds</p>
+              <p className="text-xs text-slate-400">{tab.tab_name} • {roundsList.length} Rounds</p>
             </div>
           </div>
 
@@ -175,19 +190,19 @@ export const TabBillModal: React.FC<TabBillModalProps> = ({
 
             {/* Rounds and Items Breakdown */}
             <div className="py-3 border-b border-dashed border-slate-300 space-y-3 text-[11px]">
-              {tab.rounds.map((round) => (
+              {roundsList.map((round) => (
                 <div key={round.id} className="space-y-1">
                   <div className="font-black text-[10px] uppercase text-slate-600 bg-slate-100 px-1 py-0.5 flex justify-between">
                     <span>Round #{round.round_number}</span>
-                    <span>KES {round.round_total.toLocaleString()}</span>
+                    <span>KES {(round.round_total || 0).toLocaleString()}</span>
                   </div>
-                  {round.items.map((it, idx) => (
+                  {(round.items || []).map((it, idx) => (
                     <div key={idx} className="flex justify-between pl-1">
                       <span className="truncate pr-2">
-                        {it.quantity}× {it.product.name}
+                        {it.quantity}× {it.product?.name || 'Item'}
                       </span>
                       <span className="shrink-0 font-semibold">
-                        {(it.product.price * it.quantity).toLocaleString()}
+                        {(((it.product?.price || 0) * it.quantity)).toLocaleString()}
                       </span>
                     </div>
                   ))}
@@ -199,11 +214,11 @@ export const TabBillModal: React.FC<TabBillModalProps> = ({
             <div className="pt-3 pb-2 space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">Total Drinks:</span>
-                <span className="font-bold">{tab.total_items_count} units</span>
+                <span className="font-bold">{tab.total_items_count || 0} units</span>
               </div>
               <div className="flex justify-between text-sm font-black pt-1 border-t border-slate-200">
                 <span>TOTAL BILL:</span>
-                <span>KES {tab.total_amount.toLocaleString()}</span>
+                <span>KES {(tab.total_amount || 0).toLocaleString()}</span>
               </div>
             </div>
 
