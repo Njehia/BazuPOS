@@ -18,6 +18,17 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+  // Permissive CORS middleware for cross-origin or sandboxed iframe preview requests
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({
@@ -31,8 +42,10 @@ async function startServer() {
   // Multimodal Stock Parser (Invoice / Receipt / Shelf Photo / PDF)
   app.post('/api/parse-stock', async (req, res) => {
     try {
+      console.log(`[/api/parse-stock] Received request at ${new Date().toISOString()}`);
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
+        console.error('[/api/parse-stock] GEMINI_API_KEY missing');
         return res.status(400).json({
           success: false,
           error: 'GEMINI_API_KEY is not configured in the environment.',
@@ -41,11 +54,14 @@ async function startServer() {
 
       const { fileBase64, mimeType, filename } = req.body;
       if (!fileBase64 || !mimeType) {
+        console.error('[/api/parse-stock] Missing fileBase64 or mimeType');
         return res.status(400).json({
           success: false,
           error: 'Missing fileBase64 or mimeType in request.',
         });
       }
+
+      console.log(`[/api/parse-stock] File: ${filename || 'unnamed'}, mimeType: ${mimeType}, base64 length: ${fileBase64.length}`);
 
       const ai = new GoogleGenAI({
         apiKey,

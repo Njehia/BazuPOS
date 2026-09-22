@@ -145,8 +145,8 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
   // Compress & optimize image files using HTML5 Canvas to prevent upload timeouts and proxy 413s
   const compressAndOptimizeImage = async (
     file: File,
-    maxDimension = 1600,
-    quality = 0.82
+    maxDimension = 1280,
+    quality = 0.78
   ): Promise<{ base64: string; mimeType: string }> => {
     // If not an image (e.g. PDF), read base64 directly
     if (!file.type.startsWith('image/')) {
@@ -305,9 +305,10 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
       let response: Response;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
 
-        response = await fetch('/api/parse-stock', {
+        const endpoint = `${window.location.origin}/api/parse-stock`;
+        response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -321,10 +322,10 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
         clearTimeout(timeoutId);
       } catch (fetchErr: any) {
         if (fetchErr.name === 'AbortError') {
-          throw new Error('Connection timed out while analyzing receipt. Please try again or use Quick Manual Entry below.');
+          throw new Error('Connection timed out while analyzing receipt (90s). Please try again or use Quick Manual Entry below.');
         }
         throw new Error(
-          `Network connection error (${fetchErr?.message || 'Failed to fetch'}). You can use Quick Manual Entry to enter items without delay.`
+          `Network connection error (${fetchErr?.message || 'Failed to fetch'}). Please ensure the dev server is active, or use Quick Manual Entry to add items immediately.`
         );
       }
 
