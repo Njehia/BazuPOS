@@ -47,7 +47,14 @@ async function startServer() {
         });
       }
 
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
 
       // Clean base64 data prefix if present
       const cleanBase64 = fileBase64.replace(/^data:[^;]+;base64,/, '');
@@ -89,10 +96,9 @@ If crate quantities are listed (e.g., '2 crates of 24'), calculate total bottle 
       };
 
       const CANDIDATE_MODELS = [
-        'gemini-3.8-flash',
-        'gemini-3.6-flash',
         'gemini-flash-latest',
         'gemini-3.1-flash-lite',
+        'gemini-3.8-flash',
       ];
 
       let lastError: any = null;

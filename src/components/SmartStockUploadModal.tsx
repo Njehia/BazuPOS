@@ -142,6 +142,63 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
     });
   };
 
+  // Compress & optimize image files using HTML5 Canvas to prevent upload timeouts and proxy 413s
+  const compressAndOptimizeImage = async (
+    file: File,
+    maxDimension = 1600,
+    quality = 0.82
+  ): Promise<{ base64: string; mimeType: string }> => {
+    // If not an image (e.g. PDF), read base64 directly
+    if (!file.type.startsWith('image/')) {
+      const b64 = await fileToBase64(file);
+      return { base64: b64, mimeType: file.type || 'application/pdf' };
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(width, 100);
+        canvas.height = Math.max(height, 100);
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          fileToBase64(file).then((b64) => resolve({ base64: b64, mimeType: 'image/jpeg' }));
+          return;
+        }
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({ base64: dataUrl, mimeType: 'image/jpeg' });
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        fileToBase64(file).then((b64) => resolve({ base64: b64, mimeType: file.type || 'image/jpeg' }));
+      };
+
+      img.src = objectUrl;
+    });
+  };
+
   // Handle Excel / CSV File Parsing locally via XLSX
   const processExcelFile = async (file: File) => {
     setIsProcessing(true);
@@ -230,36 +287,66 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
     setIsProcessing(true);
     setProcessingStatus(
       type === 'PICTURE'
-        ? 'Analyzing photo of invoice/receipt with Gemini AI...'
-        : 'Reading PDF delivery invoice with Gemini AI...'
+        ? 'Optimizing receipt image for quick upload...'
+        : 'Reading PDF delivery invoice with AI...'
     );
     setErrorMessage(null);
 
     try {
-      const base64 = await fileToBase64(file);
+      // Compress camera photos to prevent upload timeouts & proxy payload limits
+      const { base64, mimeType } = await compressAndOptimizeImage(file);
 
-      const response = await fetch('/api/parse-stock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileBase64: base64,
-          mimeType: file.type || (type === 'PDF' ? 'application/pdf' : 'image/jpeg'),
-          filename: file.name,
-          fileType: type,
-        }),
-      });
+      setProcessingStatus(
+        type === 'PICTURE'
+          ? 'Scanning receipt text & detecting drinks with Gemini AI...'
+          : 'Analyzing PDF line items with Gemini AI...'
+      );
 
-      const resData = await response.json();
+      let response: Response;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Gemini stock extraction failed.');
+        response = await fetch('/api/parse-stock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            fileBase64: base64,
+            mimeType: mimeType,
+            filename: file.name,
+            fileType: type,
+          }),
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchErr: any) {
+        if (fetchErr.name === 'AbortError') {
+          throw new Error('Connection timed out while analyzing receipt. Please try again or use Quick Manual Entry below.');
+        }
+        throw new Error(
+          `Network connection error (${fetchErr?.message || 'Failed to fetch'}). You can use Quick Manual Entry to enter items without delay.`
+        );
+      }
+
+      let resData: any = null;
+      try {
+        const text = await response.text();
+        resData = JSON.parse(text);
+      } catch (parseErr) {
+        throw new Error(
+          `Server returned status ${response.status}. The uploaded image might be too large or the server encountered an error. Try Quick Manual Entry below.`
+        );
+      }
+
+      if (!response.ok || !resData?.success) {
+        throw new Error(resData?.error || `Stock extraction failed (HTTP ${response.status}).`);
       }
 
       const extractedItemsRaw = resData.data?.items || [];
       if (!Array.isArray(extractedItemsRaw) || extractedItemsRaw.length === 0) {
         const note = resData.data?.notes ? ` (${resData.data.notes})` : '';
         throw new Error(
-          `No recognizable drinks or stock items found in the document${note}. Please ensure the delivery slip, photo, or invoice is clear and readable.`
+          `No recognizable drinks or stock items found in the document${note}. Please ensure the receipt is clear, or use Quick Manual Entry.`
         );
       }
 
@@ -297,13 +384,174 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
       setParsedItems(matchedResults);
       setStep('REVIEW');
     } catch (err: any) {
-      console.error(err);
+      console.error('Receipt parse error:', err);
       setErrorMessage(
-        err.message || 'Error processing document. Ensure GEMINI_API_KEY is configured and the image is clear.'
+        err.message || 'Error processing document. Ensure the image is clear or use Quick Manual Entry.'
       );
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Quick Manual Restock (Direct Entry without camera/document)
+  const handleStartQuickManualEntry = () => {
+    setErrorMessage(null);
+    setSourceFileName('Physical Receipt Entry');
+    setSourceType('PICTURE');
+    const defaultProduct = existingProducts[0];
+    const initialItem: ParsedStockItem = defaultProduct
+      ? {
+          id: `manual-1-${Date.now()}`,
+          name: defaultProduct.name,
+          category: defaultProduct.category,
+          quantity: 1,
+          unit: defaultProduct.unit,
+          cost_price: undefined,
+          selling_price: defaultProduct.price,
+          barcode: defaultProduct.barcode,
+          matched_product_id: defaultProduct.id,
+          matched_product_name: defaultProduct.name,
+          current_stock: defaultProduct.stock_qty,
+          new_stock_after: defaultProduct.stock_qty + 1,
+          is_new_product: false,
+          status: 'CONFIRMED',
+          confidence: 'HIGH',
+        }
+      : {
+          id: `manual-1-${Date.now()}`,
+          name: 'Tusker Lager 500ml',
+          category: 'beer',
+          quantity: 24,
+          unit: 'Bottle',
+          cost_price: 180,
+          selling_price: 220,
+          current_stock: 0,
+          new_stock_after: 24,
+          is_new_product: true,
+          status: 'CONFIRMED',
+          confidence: 'HIGH',
+        };
+
+    setParsedItems([initialItem]);
+    setStep('REVIEW');
+  };
+
+  // Add another line item while reviewing
+  const handleAddLineItem = () => {
+    const unusedProduct =
+      existingProducts.find((p) => !parsedItems.some((i) => i.matched_product_id === p.id)) ||
+      existingProducts[0];
+
+    const newItem: ParsedStockItem = unusedProduct
+      ? {
+          id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: unusedProduct.name,
+          category: unusedProduct.category,
+          quantity: 1,
+          unit: unusedProduct.unit,
+          cost_price: undefined,
+          selling_price: unusedProduct.price,
+          barcode: unusedProduct.barcode,
+          matched_product_id: unusedProduct.id,
+          matched_product_name: unusedProduct.name,
+          current_stock: unusedProduct.stock_qty,
+          new_stock_after: unusedProduct.stock_qty + 1,
+          is_new_product: false,
+          status: 'CONFIRMED',
+          confidence: 'HIGH',
+        }
+      : {
+          id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: '',
+          category: 'beer',
+          quantity: 1,
+          unit: 'Bottle',
+          selling_price: 200,
+          current_stock: 0,
+          new_stock_after: 1,
+          is_new_product: true,
+          status: 'CONFIRMED',
+          confidence: 'HIGH',
+        };
+
+    setParsedItems((prev) => [...prev, newItem]);
+  };
+
+  // Re-match or switch product mapping for a line item
+  const handleProductSelect = (id: string, productId: string) => {
+    if (productId === '__new__') {
+      setParsedItems((prev) =>
+        prev.map((i) =>
+          i.id === id
+            ? {
+                ...i,
+                matched_product_id: undefined,
+                matched_product_name: undefined,
+                is_new_product: true,
+                current_stock: 0,
+                new_stock_after: i.quantity,
+              }
+            : i
+        )
+      );
+      return;
+    }
+
+    const prod = existingProducts.find((p) => p.id === productId);
+    if (!prod) return;
+
+    setParsedItems((prev) =>
+      prev.map((i) =>
+        i.id === id
+          ? {
+              ...i,
+              name: prod.name,
+              category: prod.category,
+              matched_product_id: prod.id,
+              matched_product_name: prod.name,
+              current_stock: prod.stock_qty,
+              new_stock_after: prod.stock_qty + i.quantity,
+              selling_price: i.selling_price || prod.price,
+              barcode: prod.barcode || i.barcode,
+              is_new_product: false,
+              confidence: 'HIGH',
+            }
+          : i
+      )
+    );
+  };
+
+  const handleUpdateItemName = (id: string, newName: string) => {
+    setParsedItems((prev) =>
+      prev.map((i) => {
+        if (i.id !== id) return i;
+        const match = matchWithInventory(newName);
+        if (match.product) {
+          return {
+            ...i,
+            name: match.product.name,
+            category: match.product.category,
+            matched_product_id: match.product.id,
+            matched_product_name: match.product.name,
+            current_stock: match.product.stock_qty,
+            new_stock_after: match.product.stock_qty + i.quantity,
+            selling_price: i.selling_price || match.product.price,
+            barcode: match.product.barcode || i.barcode,
+            is_new_product: false,
+            confidence: match.confidence,
+          };
+        }
+        return {
+          ...i,
+          name: newName,
+          matched_product_id: undefined,
+          matched_product_name: undefined,
+          is_new_product: true,
+          current_stock: 0,
+          new_stock_after: i.quantity,
+        };
+      })
+    );
   };
 
   // Dispatch File Selection
@@ -557,18 +805,32 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
 
         {/* Error Notification */}
         {errorMessage && (
-          <div className="mx-5 mt-3 px-3 py-2 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-lg text-xs flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{errorMessage}</span>
+          <div className="mx-5 mt-3 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block">{errorMessage}</span>
+                <span className="text-[11px] text-rose-700/80 dark:text-rose-300/80">
+                  Tip: If your photo or network fails, you can switch to Quick Manual Entry to add receipt items without delay.
+                </span>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setErrorMessage(null)}
-              className="text-slate-400 hover:text-slate-600"
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleStartQuickManualEntry}
+                className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer shadow-xs whitespace-nowrap"
+              >
+                Quick Manual Entry
+              </button>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         )}
 
@@ -606,27 +868,27 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
                   </div>
 
                   {/* Primary Action Buttons */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {/* Snap Picture Button */}
                     <button
                       type="button"
                       onClick={() => cameraInputRef.current?.click()}
-                      className="p-5 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-400 bg-white dark:bg-slate-800/80 flex flex-col items-start gap-3 transition-all cursor-pointer group text-left shadow-xs hover:shadow-md"
+                      className="p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-400 bg-white dark:bg-slate-800/80 flex flex-col items-start gap-2.5 transition-all cursor-pointer group text-left shadow-xs hover:shadow-md"
                     >
-                      <div className="w-12 h-12 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                        <Camera className="w-6 h-6" />
+                      <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Camera className="w-5 h-5" />
                       </div>
                       <div>
                         <div className="flex items-center gap-1.5">
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                            Scan Receipt with Camera
+                          <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                            Scan with Camera
                           </h4>
-                          <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.2 rounded">
+                          <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.2 rounded">
                             Fast
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                          Take a clear photo of paper receipt, delivery note, or crate invoice
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Take a photo of paper receipt or delivery slip
                         </p>
                       </div>
                     </button>
@@ -635,17 +897,36 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="p-5 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white dark:bg-slate-800/80 flex flex-col items-start gap-3 transition-all cursor-pointer group text-left shadow-xs hover:shadow-md"
+                      className="p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white dark:bg-slate-800/80 flex flex-col items-start gap-2.5 transition-all cursor-pointer group text-left shadow-xs hover:shadow-md"
                     >
-                      <div className="w-12 h-12 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                        <Upload className="w-6 h-6" />
+                      <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Upload className="w-5 h-5" />
                       </div>
                       <div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                          Upload Receipt Document
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                          Upload Document
                         </h4>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                          Upload photo (JPG/PNG), digital PDF invoice, or Excel delivery sheet
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Upload photo (JPG/PNG), PDF invoice, or Excel
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Quick Manual Entry Button */}
+                    <button
+                      type="button"
+                      onClick={handleStartQuickManualEntry}
+                      className="p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700 hover:border-blue-500 dark:hover:border-blue-400 bg-white dark:bg-slate-800/80 flex flex-col items-start gap-2.5 transition-all cursor-pointer group text-left shadow-xs hover:shadow-md"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                          Quick Receipt Entry
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                          Type or pick items directly from paper receipt
                         </p>
                       </div>
                     </button>
@@ -781,14 +1062,43 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
                               )}
                             </td>
 
-                            <td className="py-2.5 px-3">
-                              <p className="font-bold text-slate-900 dark:text-white uppercase leading-snug">
-                                {item.name}
-                              </p>
-                              {item.matched_product_name && item.matched_product_name !== item.name && (
-                                <p className="text-[10px] text-slate-400">
-                                  Matched to: {item.matched_product_name}
-                                </p>
+                            <td className="py-2.5 px-3 min-w-[180px]">
+                              {item.is_new_product ? (
+                                <div className="space-y-1">
+                                  <input
+                                    type="text"
+                                    value={item.name}
+                                    onChange={(e) => handleUpdateItemName(item.id, e.target.value)}
+                                    placeholder="Enter drink name..."
+                                    className="w-full px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded text-xs font-bold text-slate-900 dark:text-white uppercase focus:ring-1 focus:ring-amber-500"
+                                  />
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-400">Or map to:</span>
+                                    <select
+                                      value={item.matched_product_id || '__new__'}
+                                      onChange={(e) => handleProductSelect(item.id, e.target.value)}
+                                      className="text-[11px] py-0.5 px-1 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-slate-700 dark:text-slate-300 max-w-[140px] truncate"
+                                    >
+                                      <option value="__new__">+ New Product</option>
+                                      {existingProducts.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                          {p.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <p className="font-bold text-slate-900 dark:text-white uppercase leading-snug">
+                                    {item.name}
+                                  </p>
+                                  {item.matched_product_name && item.matched_product_name !== item.name && (
+                                    <p className="text-[10px] text-slate-400">
+                                      Matched to: {item.matched_product_name}
+                                    </p>
+                                  )}
+                                </div>
                               )}
                             </td>
 
@@ -894,14 +1204,25 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
               </div>
 
               {/* Review Actions Bar */}
-              <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStep('UPLOAD')}
-                  className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  Upload Another Receipt
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep('UPLOAD')}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    Upload Another Receipt
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleAddLineItem}
+                    className="px-3.5 py-2 rounded-xl border border-dashed border-amber-500/80 dark:border-amber-500/80 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Add Another Item</span>
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-2">
                   <button

@@ -20,6 +20,33 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
       (function() {
+        // Suppress expected benign [vite] websocket connection logs in iframe dev environment
+        var originalWarn = console.warn;
+        var originalError = console.error;
+        var originalDebug = console.debug;
+        var isViteHmrMsg = function(args) {
+          try {
+            var msg = args && args[0] ? String(args[0]) : '';
+            return msg.indexOf('[vite]') !== -1 && (
+              msg.indexOf('failed to connect to websocket') !== -1 ||
+              msg.indexOf('WebSocket connection to') !== -1 ||
+              msg.indexOf('server connection lost') !== -1
+            );
+          } catch(e) { return false; }
+        };
+        console.error = function() {
+          if (isViteHmrMsg(arguments)) return;
+          originalError.apply(console, arguments);
+        };
+        console.warn = function() {
+          if (isViteHmrMsg(arguments)) return;
+          originalWarn.apply(console, arguments);
+        };
+        console.debug = function() {
+          if (isViteHmrMsg(arguments)) return;
+          originalDebug.apply(console, arguments);
+        };
+
         try {
           var saved = localStorage.getItem('bazu_pos_theme_mode');
           if (saved === 'dark' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
