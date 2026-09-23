@@ -4,6 +4,7 @@ import {
   Banknote,
   Beer,
   ChevronRight,
+  ClipboardList,
   Clock,
   FileText,
   HardDrive,
@@ -745,6 +746,17 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 <span>Smart Restock</span>
+              </button>
+
+              {/* Requisitions & Restock Button */}
+              <button
+                type="button"
+                onClick={() => handleOpenAdmin('requisitions')}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/15 text-xs font-semibold transition-all cursor-pointer"
+                title="Stock Requisitions, Distributor Restock & Physical Receiving"
+              >
+                <ClipboardList className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden md:inline">Requisitions</span>
               </button>
 
               {/* Customers & Debts Button */}

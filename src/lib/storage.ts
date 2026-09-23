@@ -2022,10 +2022,17 @@ export class LocalDb {
     const currentRequisitions = this.getRequisitions();
     const reqNo = `REQ-${new Date().getFullYear()}-${String(currentRequisitions.length + 1).padStart(3, '0')}`;
     const totalUnits = reqData.items.reduce((sum, item) => sum + (item.requested_qty || 0), 0);
-    const totalCost = reqData.items.reduce(
-      (sum, item) => sum + ((item.estimated_cost || 0) * (item.requested_qty || 0)),
-      0
-    );
+
+    // Requisitions strictly track restock physical quantities and units, without indicating selling prices
+    const cleanItems: RequisitionItem[] = reqData.items.map((it) => ({
+      product_id: it.product_id,
+      product_name: it.product_name,
+      category: it.category,
+      current_stock: it.current_stock,
+      requested_qty: it.requested_qty,
+      unit: it.unit || 'Bottle',
+      notes: it.notes,
+    }));
 
     const newReq: Requisition = {
       id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -2036,11 +2043,11 @@ export class LocalDb {
       created_at: new Date().toISOString(),
       status: 'PENDING',
       urgency: reqData.urgency,
-      items: reqData.items,
-      total_items: reqData.items.length,
+      items: cleanItems,
+      total_items: cleanItems.length,
       total_units: totalUnits,
-      total_estimated_cost: totalCost,
       notes: reqData.notes?.trim() || undefined,
+      stock_added: false,
     };
 
     const updated = [newReq, ...currentRequisitions];
@@ -2050,15 +2057,159 @@ export class LocalDb {
     return { success: true, requisition: newReq };
   }
 
-  static updateRequisitionStatus(
+  /**
+   * Cashier / Staff Requisition Fulfillment Confirmation:
+   * Confirms delivered products (individual checkmarks or all) and automatically
+   * adds the delivered bottle quantities directly to the active inventory stock.
+   */
+  static fulfillRequisition(
     id: string,
-    status: RequisitionStatus,
-    adminNotes?: string
-  ): { success: boolean; requisition?: Requisition; error?: string } {
+    fulfilledBy: { id?: number; name: string; role: UserRole },
+    options?: {
+      fulfillmentNotes?: string;
+      selectedProductIds?: number[]; // Product IDs specifically checked for this delivery. If omitted, fulfills all unfulfilled items.
+      customItemQuantities?: Record<number, number>; // productId -> receivedQty
+    }
+  ): {
+    success: boolean;
+    requisition?: Requisition;
+    unitsAdded?: number;
+    itemsCount?: number;
+    isFullyFulfilled?: boolean;
+    error?: string;
+  } {
     const list = this.getRequisitions();
     const existing = list.find((r) => r.id === id);
     if (!existing) {
       return { success: false, error: 'Requisition not found.' };
+    }
+
+    // Check if there are any remaining unfulfilled items
+    const remainingUnfulfilled = existing.items.filter((it) => !it.stock_added);
+    if (remainingUnfulfilled.length === 0) {
+      return {
+        success: false,
+        error: 'All products on this requisition have already been confirmed as delivered and added to inventory stock.',
+      };
+    }
+
+    const selectedIds = options?.selectedProductIds;
+    // Determine items to fulfill in this batch
+    const itemsToFulfill = selectedIds && selectedIds.length > 0
+      ? existing.items.filter((it) => !it.stock_added && selectedIds.includes(it.product_id))
+      : remainingUnfulfilled;
+
+    if (itemsToFulfill.length === 0) {
+      return {
+        success: false,
+        error: 'Please check at least one pending product to mark as delivered.',
+      };
+    }
+
+    const products = this.getProducts();
+    let totalUnitsAdded = 0;
+    const updatedProducts: Product[] = [...products];
+    const timestamp = new Date().toISOString();
+
+    // Increment inventory stock for each checked item
+    const updatedItems = existing.items.map((item) => {
+      // If already added to stock in a previous delivery, keep as-is
+      if (item.stock_added) {
+        return item;
+      }
+
+      // If not checked in this batch, remain unfulfilled
+      const isSelected = !selectedIds || selectedIds.includes(item.product_id);
+      if (!isSelected) {
+        return item;
+      }
+
+      const fulfilledQty = options?.customItemQuantities?.[item.product_id] !== undefined
+        ? Math.max(0, options.customItemQuantities[item.product_id])
+        : item.requested_qty;
+
+      totalUnitsAdded += fulfilledQty;
+
+      const pIndex = updatedProducts.findIndex((p) => p.id === item.product_id);
+      if (pIndex !== -1) {
+        const prod = updatedProducts[pIndex];
+        const newStock = Math.max(0, (prod.stock_qty || 0) + fulfilledQty);
+        const updatedProd: Product = {
+          ...prod,
+          stock_qty: newStock,
+        };
+        updatedProducts[pIndex] = updatedProd;
+        // Real-time Cloud sync for restocked product
+        CloudDb.setProduct(updatedProd);
+      }
+
+      return {
+        ...item,
+        fulfilled_qty: fulfilledQty,
+        stock_added: true,
+        is_delivered: true,
+        delivered_at: timestamp,
+        delivered_by_name: fulfilledBy.name,
+      };
+    });
+
+    // Save updated products to localStorage
+    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+
+    // Determine overall requisition status
+    const allFulfilled = updatedItems.every((it) => it.stock_added);
+
+    // Update requisition state with fulfillment audit trail
+    const updatedReq: Requisition = {
+      ...existing,
+      status: allFulfilled ? 'FULFILLED' : 'PARTIALLY_FULFILLED',
+      stock_added: allFulfilled,
+      fulfilled_by_name: fulfilledBy.name,
+      fulfilled_by_id: fulfilledBy.id,
+      fulfilled_by_role: fulfilledBy.role,
+      fulfilled_at: timestamp,
+      fulfillment_notes: options?.fulfillmentNotes?.trim()
+        ? options.fulfillmentNotes.trim()
+        : existing.fulfillment_notes,
+      items: updatedItems,
+      updated_at: timestamp,
+    };
+
+    const updatedList = list.map((r) => (r.id === id ? updatedReq : r));
+    localStorage.setItem(STORAGE_KEYS.REQUISITIONS, JSON.stringify(updatedList));
+    CloudDb.setRequisition(updatedReq);
+
+    this.notifyListeners();
+    return {
+      success: true,
+      requisition: updatedReq,
+      unitsAdded: totalUnitsAdded,
+      itemsCount: itemsToFulfill.length,
+      isFullyFulfilled: allFulfilled,
+    };
+  }
+
+  static updateRequisitionStatus(
+    id: string,
+    status: RequisitionStatus,
+    adminNotes?: string,
+    user?: { id?: number; name: string; role: UserRole }
+  ): { success: boolean; requisition?: Requisition; unitsAdded?: number; error?: string } {
+    const list = this.getRequisitions();
+    const existing = list.find((r) => r.id === id);
+    if (!existing) {
+      return { success: false, error: 'Requisition not found.' };
+    }
+
+    // If changing to FULFILLED or RECEIVED and stock has not been added yet, automatically restock!
+    if ((status === 'FULFILLED' || status === 'RECEIVED') && !existing.stock_added) {
+      const fallbackUser = user || {
+        name: existing.requested_by_name || 'Staff',
+        role: existing.requested_by_role || 'SALES_CASHIER',
+      };
+      return this.fulfillRequisition(id, fallbackUser, {
+        fulfillmentNotes: adminNotes,
+      });
     }
 
     const updatedReq: Requisition = {

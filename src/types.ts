@@ -186,7 +186,14 @@ export interface CartItem {
   quantity: number;
 }
 
-export type RequisitionStatus = 'PENDING' | 'APPROVED' | 'ORDERED' | 'RECEIVED' | 'REJECTED';
+export type RequisitionStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'ORDERED'
+  | 'PARTIALLY_FULFILLED'
+  | 'RECEIVED'
+  | 'FULFILLED'
+  | 'REJECTED';
 export type RequisitionUrgency = 'NORMAL' | 'HIGH' | 'CRITICAL' | 'URGENT';
 
 export interface RequisitionItem {
@@ -196,6 +203,11 @@ export interface RequisitionItem {
   category?: string;
   current_stock: number;
   requested_qty: number;
+  fulfilled_qty?: number;
+  stock_added?: boolean;
+  is_delivered?: boolean;
+  delivered_at?: string;
+  delivered_by_name?: string;
   unit: string;
   estimated_cost?: number;
   notes?: string;
@@ -219,6 +231,13 @@ export interface Requisition {
   reviewed_by_name?: string;
   reviewed_at?: string;
   updated_at?: string;
+  // Fulfillment & auto stock restock tracking
+  stock_added?: boolean;
+  fulfilled_by_name?: string;
+  fulfilled_by_id?: number;
+  fulfilled_by_role?: UserRole;
+  fulfilled_at?: string;
+  fulfillment_notes?: string;
 }
 
 // =========================================================================

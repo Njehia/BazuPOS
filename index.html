@@ -24,16 +24,40 @@
         var originalWarn = console.warn;
         var originalError = console.error;
         var originalDebug = console.debug;
+        var originalLog = console.log;
+        var originalInfo = console.info;
+
         var isViteHmrMsg = function(args) {
           try {
-            var msg = args && args[0] ? String(args[0]) : '';
-            return msg.indexOf('[vite]') !== -1 && (
-              msg.indexOf('failed to connect to websocket') !== -1 ||
-              msg.indexOf('WebSocket connection to') !== -1 ||
-              msg.indexOf('server connection lost') !== -1
-            );
+            if (!args || !args.length) return false;
+            var fullMsg = '';
+            for (var i = 0; i < args.length; i++) {
+              var a = args[i];
+              if (a === null || a === undefined) continue;
+              if (typeof a === 'string') {
+                fullMsg += ' ' + a;
+              } else if (typeof a === 'object') {
+                fullMsg += ' ' + (a.message || a.stack || (function() {
+                  try { return JSON.stringify(a); } catch(e) { return ''; }
+                })());
+              } else {
+                fullMsg += ' ' + String(a);
+              }
+            }
+            if (fullMsg.indexOf('[vite]') !== -1) {
+              return true;
+            }
+            if (
+              fullMsg.indexOf('failed to connect to websocket') !== -1 ||
+              fullMsg.indexOf('WebSocket connection to') !== -1 ||
+              fullMsg.indexOf('server connection lost') !== -1
+            ) {
+              return true;
+            }
+            return false;
           } catch(e) { return false; }
         };
+
         console.error = function() {
           if (isViteHmrMsg(arguments)) return;
           originalError.apply(console, arguments);
@@ -46,6 +70,40 @@
           if (isViteHmrMsg(arguments)) return;
           originalDebug.apply(console, arguments);
         };
+        console.log = function() {
+          if (isViteHmrMsg(arguments)) return;
+          originalLog.apply(console, arguments);
+        };
+        console.info = function() {
+          if (isViteHmrMsg(arguments)) return;
+          originalInfo.apply(console, arguments);
+        };
+
+        window.addEventListener('error', function(event) {
+          try {
+            var msg = event && event.message ? String(event.message) : '';
+            if (msg.indexOf('[vite]') !== -1 || msg.indexOf('WebSocket') !== -1) {
+              event.preventDefault();
+              if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+              }
+              return true;
+            }
+          } catch(e) {}
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(event) {
+          try {
+            var reason = event && event.reason ? String(event.reason.message || event.reason) : '';
+            if (reason.indexOf('[vite]') !== -1 || reason.indexOf('WebSocket') !== -1) {
+              event.preventDefault();
+              if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+              }
+              return true;
+            }
+          } catch(e) {}
+        }, true);
 
         try {
           var saved = localStorage.getItem('bazu_pos_theme_mode');

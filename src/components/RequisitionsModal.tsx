@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   CheckCircle2,
+  CheckSquare,
   Clock,
   AlertTriangle,
   Package,
@@ -136,6 +137,11 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Delivery Verification Checkmarks (productId -> boolean)
+  const [deliveryChecks, setDeliveryChecks] = useState<Record<number, boolean>>({});
+  // Delivery Custom Quantities (productId -> number)
+  const [deliveryQuantities, setDeliveryQuantities] = useState<Record<number, number>>({});
+
   // Admin review note state
   const [adminNoteInput, setAdminNoteInput] = useState('');
 
@@ -160,6 +166,59 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
   useEffect(() => {
     reloadRequisitions();
   }, []);
+
+  // Synchronize delivery verification checklist whenever the selected requisition changes
+  useEffect(() => {
+    if (selectedRequisition) {
+      setDeliveryChecks((prev) => {
+        const next: Record<number, boolean> = {};
+        selectedRequisition.items.forEach((item) => {
+          if (!item.stock_added) {
+            // Default checked for convenience; preserve previous choice if already interacted
+            next[item.product_id] = prev[item.product_id] ?? true;
+          }
+        });
+        return next;
+      });
+      setDeliveryQuantities((prev) => {
+        const next: Record<number, number> = {};
+        selectedRequisition.items.forEach((item) => {
+          if (!item.stock_added) {
+            next[item.product_id] = prev[item.product_id] ?? item.requested_qty;
+          }
+        });
+        return next;
+      });
+    } else {
+      setDeliveryChecks({});
+      setDeliveryQuantities({});
+    }
+  }, [selectedRequisition]);
+
+  const handleToggleDeliveryCheck = (productId: number) => {
+    setDeliveryChecks((prev) => ({
+      ...prev,
+      [productId]: !prev[productId],
+    }));
+  };
+
+  const handleSelectAllDeliveryChecks = (checkAll: boolean) => {
+    if (!selectedRequisition) return;
+    const next: Record<number, boolean> = {};
+    selectedRequisition.items.forEach((item) => {
+      if (!item.stock_added) {
+        next[item.product_id] = checkAll;
+      }
+    });
+    setDeliveryChecks(next);
+  };
+
+  const handleDeliveryQtyChange = (productId: number, qty: number) => {
+    setDeliveryQuantities((prev) => ({
+      ...prev,
+      [productId]: Math.max(1, qty),
+    }));
+  };
 
   const categories = useMemo(() => {
     const set = new Set(products.map((p) => p.category));
@@ -191,7 +250,6 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
       current_stock: product.stock_qty,
       requested_qty: defaultQty,
       unit: product.unit || 'Bottle',
-      estimated_cost: product.price ? product.price * 0.8 : 0,
     };
     setSelectedItems([...selectedItems, newItem]);
   };
@@ -222,7 +280,6 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
           current_stock: p.stock_qty,
           requested_qty: Math.max(12, (p.low_stock_threshold || 10) * 2 - p.stock_qty),
           unit: p.unit || 'Bottle',
-          estimated_cost: p.price ? p.price * 0.8 : 0,
         });
       }
     });
@@ -263,32 +320,77 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
     }
   };
 
+  const handleFulfillRequisition = () => {
+    if (!selectedRequisition) return;
+
+    // Filter which unfulfilled items are checked
+    const checkedProductIds = selectedRequisition.items
+      .filter((it) => !it.stock_added && deliveryChecks[it.product_id])
+      .map((it) => it.product_id);
+
+    if (checkedProductIds.length === 0) {
+      setErrorMsg('Please check at least one delivered product to add to inventory.');
+      setTimeout(() => setErrorMsg(null), 5000);
+      return;
+    }
+
+    const res = LocalDb.fulfillRequisition(
+      selectedRequisition.id,
+      { id: currentUser.id, name: currentUser.name, role: currentUser.role },
+      {
+        selectedProductIds: checkedProductIds,
+        customItemQuantities: deliveryQuantities,
+        fulfillmentNotes: adminNoteInput.trim() || undefined,
+      }
+    );
+
+    if (res.success && res.requisition) {
+      if (onInventoryChanged) onInventoryChanged();
+      const unitWord = (res.unitsAdded ?? 0) === 1 ? 'bottle' : 'bottles';
+      const itemWord = (res.itemsCount ?? 0) === 1 ? 'product' : 'products';
+
+      if (res.isFullyFulfilled) {
+        setSuccessMsg(
+          `Requisition ${res.requisition.requisition_no} fully fulfilled! +${res.unitsAdded} ${unitWord} across ${res.itemsCount} ${itemWord} added to active inventory.`
+        );
+      } else {
+        setSuccessMsg(
+          `Delivery confirmed! +${res.unitsAdded} ${unitWord} for ${res.itemsCount} ${itemWord} added directly to active inventory. Requisition marked as Partially Fulfilled (remaining products still pending).`
+        );
+      }
+
+      setSelectedRequisition(res.requisition);
+      reloadRequisitions();
+      setTimeout(() => setSuccessMsg(null), 6000);
+    } else {
+      setErrorMsg(res.error || 'Failed to fulfill requisition.');
+      setTimeout(() => setErrorMsg(null), 5000);
+    }
+  };
+
   const handleUpdateStatus = (status: RequisitionStatus) => {
     if (!selectedRequisition) return;
     const res = LocalDb.updateRequisitionStatus(
       selectedRequisition.id,
       status,
-      adminNoteInput.trim() || undefined
+      adminNoteInput.trim() || undefined,
+      { id: currentUser.id, name: currentUser.name, role: currentUser.role }
     );
     if (res.success && res.requisition) {
-      // If status is RECEIVED, prompt or auto-update product stock
-      if (status === 'RECEIVED') {
-        res.requisition.items.forEach((item) => {
-          const prod = products.find((p) => p.id === item.product_id);
-          if (prod) {
-            LocalDb.updateProduct(prod.id, {
-              stock_qty: prod.stock_qty + item.requested_qty,
-            });
-          }
-        });
+      if (status === 'RECEIVED' || status === 'FULFILLED') {
         if (onInventoryChanged) onInventoryChanged();
-        setSuccessMsg(`Requisition marked as RECEIVED and inventory stock updated!`);
+        setSuccessMsg(
+          `Requisition marked as ${status} and +${res.unitsAdded ?? res.requisition.total_units} bottle units added to active inventory stock!`
+        );
       } else {
         setSuccessMsg(`Requisition status updated to ${status}`);
       }
       setSelectedRequisition(res.requisition);
       reloadRequisitions();
       setTimeout(() => setSuccessMsg(null), 4000);
+    } else {
+      setErrorMsg(res.error || 'Failed to update requisition status.');
+      setTimeout(() => setErrorMsg(null), 4000);
     }
   };
 
@@ -302,7 +404,13 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
 
   const filteredRequisitions = useMemo(() => {
     return requisitions.filter((r) => {
-      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'FULFILLED') {
+          if (r.status !== 'FULFILLED' && r.status !== 'RECEIVED' && !r.stock_added) return false;
+        } else if (r.status !== statusFilter) {
+          return false;
+        }
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchNo = r.requisition_no.toLowerCase().includes(q);
@@ -424,7 +532,7 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
 
             {/* Filter Pills */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 text-[11px]">
-              {(['ALL', 'PENDING', 'APPROVED', 'ORDERED', 'RECEIVED', 'REJECTED'] as const).map(
+              {(['ALL', 'PENDING', 'APPROVED', 'ORDERED', 'PARTIALLY_FULFILLED', 'FULFILLED', 'REJECTED'] as const).map(
                 (st) => (
                   <button
                     key={st}
@@ -436,7 +544,13 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                     }`}
                   >
-                    {st === 'ALL' ? 'All Requests' : st}
+                    {st === 'ALL'
+                      ? 'All Requests'
+                      : st === 'PARTIALLY_FULFILLED'
+                      ? 'Partial Delivery'
+                      : st === 'FULFILLED'
+                      ? 'Fulfilled / Restocked'
+                      : st}
                   </button>
                 )
               )}
@@ -456,14 +570,25 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
             ) : (
               filteredRequisitions.map((req) => {
                 const isSelected = selectedRequisition?.id === req.id;
-                const statusColor =
-                  req.status === 'RECEIVED'
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                    : req.status === 'APPROVED' || req.status === 'ORDERED'
-                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                    : req.status === 'REJECTED'
-                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+                const fulfilledCount = req.items.filter((i) => i.stock_added).length;
+                const isFulfilled =
+                  req.status === 'FULFILLED' ||
+                  req.status === 'RECEIVED' ||
+                  (req.items.length > 0 && fulfilledCount === req.items.length) ||
+                  req.stock_added;
+                const isPartiallyFulfilled =
+                  !isFulfilled &&
+                  (req.status === 'PARTIALLY_FULFILLED' || fulfilledCount > 0);
+
+                const statusColor = isFulfilled
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : isPartiallyFulfilled
+                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                  : req.status === 'APPROVED' || req.status === 'ORDERED'
+                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                  : req.status === 'REJECTED'
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                  : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30';
 
                 return (
                   <div
@@ -486,7 +611,11 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
                       <span
                         className={`text-[10px] uppercase font-black px-2 py-0.5 rounded-full border ${statusColor}`}
                       >
-                        {req.status}
+                        {isFulfilled
+                          ? 'FULFILLED'
+                          : isPartiallyFulfilled
+                          ? `PARTIAL (${fulfilledCount}/${req.items.length})`
+                          : req.status}
                       </span>
                     </div>
 
@@ -749,273 +878,552 @@ export const RequisitionsModal: React.FC<RequisitionsModalProps> = ({
                 </button>
               </div>
             </form>
-          ) : selectedRequisition ? (
-            /* DETAIL VIEW FOR SELECTED REQUISITION */
-            <div className="max-w-4xl mx-auto w-full space-y-5">
-              {/* Header Details Card */}
-              <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2.5">
-                    <h3 className="text-lg font-black text-slate-900 dark:text-white font-mono">
-                      {selectedRequisition.requisition_no}
-                    </h3>
-                    <span
-                      className={`text-xs uppercase font-black px-2.5 py-0.5 rounded-full border ${
-                        selectedRequisition.status === 'RECEIVED'
-                          ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
-                          : selectedRequisition.status === 'APPROVED' || selectedRequisition.status === 'ORDERED'
-                          ? 'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                          : selectedRequisition.status === 'REJECTED'
-                          ? 'bg-rose-500/10 text-rose-600 border-rose-500/30'
-                          : 'bg-amber-500/10 text-amber-600 border-amber-500/30'
-                      }`}
-                    >
-                      {selectedRequisition.status}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Requested by <strong>{selectedRequisition.requested_by_name}</strong> (
-                    {getRoleLabel(selectedRequisition.requested_by_role)}) on{' '}
-                    {new Date(selectedRequisition.created_at).toLocaleString('en-KE')}
-                  </p>
-                </div>
+          ) : selectedRequisition ? (() => {
+            const unfulfilledItems = selectedRequisition.items.filter((it) => !it.stock_added);
+            const fulfilledItems = selectedRequisition.items.filter((it) => it.stock_added);
+            const checkedUnfulfilledItems = unfulfilledItems.filter((it) => deliveryChecks[it.product_id]);
+            const totalCheckedUnits = checkedUnfulfilledItems.reduce(
+              (sum, it) => sum + (deliveryQuantities[it.product_id] ?? it.requested_qty),
+              0
+            );
+            const totalRequestedUnits = selectedRequisition.items.reduce(
+              (sum, it) => sum + (Number(it.requested_qty) || 0),
+              0
+            );
+            const totalDeliveredUnits = fulfilledItems.reduce(
+              (sum, it) => sum + (it.fulfilled_qty || it.requested_qty),
+              0
+            );
+            const isAllFulfilled =
+              selectedRequisition.stock_added ||
+              selectedRequisition.status === 'FULFILLED' ||
+              (selectedRequisition.items.length > 0 && fulfilledItems.length === selectedRequisition.items.length);
+            const isPartiallyFulfilled =
+              !isAllFulfilled &&
+              (selectedRequisition.status === 'PARTIALLY_FULFILLED' || fulfilledItems.length > 0);
 
-                {/* Admin Delete Action */}
-                {isAdminOrSupervisor && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteRequisition(selectedRequisition.id)}
-                    className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900/40 text-xs font-bold flex items-center gap-1.5 self-start cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>Delete Requisition</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Communication & Actions Toolbar */}
-              <div className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* WhatsApp Admin */}
-                  <button
-                    type="button"
-                    onClick={() => setShowWhatsAppModal(true)}
-                    className="px-3.5 py-2 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 font-black text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
-                    title="Notify Admin via WhatsApp"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>WhatsApp Admin</span>
-                  </button>
-
-                  {/* Email Admin */}
-                  <button
-                    type="button"
-                    onClick={() => setShowEmailModal(true)}
-                    className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
-                    title="Send Requisition via Email"
-                  >
-                    <Mail className="w-4 h-4" />
-                    <span>Email Requisition</span>
-                  </button>
-
-                  {/* Print Restock Slip */}
-                  <button
-                    type="button"
-                    onClick={() => setShowPrintModal(true)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
-                    title="Print Restock Order Slip"
-                  >
-                    <Printer className="w-4 h-4 text-amber-400 dark:text-amber-600" />
-                    <span>Print Slip</span>
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {/* PDF Download */}
-                  <button
-                    type="button"
-                    onClick={() => exportRequisitionPDF(selectedRequisition, storeConfig)}
-                    className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    title="Export as PDF Document"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>PDF</span>
-                  </button>
-
-                  {/* Excel Download */}
-                  <button
-                    type="button"
-                    onClick={() => exportRequisitionExcel(selectedRequisition, storeConfig)}
-                    className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    title="Export as Excel Spreadsheet"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>Excel</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Summary Stats Overview */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Products Listed</div>
-                  <div className="text-base font-black text-slate-900 dark:text-white font-mono mt-0.5">
-                    {selectedRequisition.items.length} items
-                  </div>
-                </div>
-                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Total Units to Order</div>
-                  <div className="text-base font-black text-amber-600 font-mono mt-0.5">
-                    {selectedRequisition.items.reduce((s, i) => s + (Number(i.requested_qty) || 0), 0)} units
-                  </div>
-                </div>
-                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 col-span-2 sm:col-span-1">
-                  <div className="text-[10px] uppercase font-bold text-slate-500">Priority / Urgency</div>
-                  <div
-                    className={`text-base font-black font-mono mt-0.5 ${
-                      selectedRequisition.urgency === 'HIGH' ||
-                      selectedRequisition.urgency === 'CRITICAL' ||
-                      selectedRequisition.urgency === 'URGENT'
-                        ? 'text-rose-600'
-                        : 'text-blue-600'
-                    }`}
-                  >
-                    {selectedRequisition.urgency}
-                  </div>
-                </div>
-              </div>
-
-              {/* Items List */}
-              <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Requested Restock Bottles &amp; Items
-                </h4>
-
-                <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                  {selectedRequisition.items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-white dark:bg-slate-900 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div>
-                        <div className="font-bold text-slate-900 dark:text-white">
-                          {item.product_name}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          Category: {item.category} • Current Stock: {item.current_stock}
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-sm font-black font-mono text-amber-600 dark:text-amber-400">
-                          +{item.requested_qty} {item.unit}s
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Notes Card */}
-              {selectedRequisition.notes && (
-                <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Staff Notes
-                  </span>
-                  <p className="text-xs text-slate-800 dark:text-slate-200">
-                    {selectedRequisition.notes}
-                  </p>
-                </div>
-              )}
-
-              {/* Admin Action Review Panel */}
-              {isAdminOrSupervisor ? (
-                <div className="p-5 bg-amber-50/50 dark:bg-amber-950/20 border-2 border-amber-500/30 rounded-2xl space-y-4">
+            return (
+              <div className="max-w-4xl mx-auto w-full space-y-5">
+                {/* Header Details Card */}
+                <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <Building2 className="w-4 h-4 text-amber-600" />
-                      Administrator Review &amp; Status Controls
-                    </h4>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                      Manage supplier fulfillment. Marking as <strong>RECEIVED</strong> will automatically restock inventory.
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                        {selectedRequisition.requisition_no}
+                      </h3>
+                      {isAllFulfilled ? (
+                        <span className="text-xs uppercase font-black px-2.5 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 flex items-center gap-1">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          FULFILLED &amp; RESTOCKED
+                        </span>
+                      ) : isPartiallyFulfilled ? (
+                        <span className="text-xs uppercase font-black px-2.5 py-0.5 rounded-full border bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          PARTIAL DELIVERY ({fulfilledItems.length}/{selectedRequisition.items.length} RESTOCKED)
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-xs uppercase font-black px-2.5 py-0.5 rounded-full border ${
+                            selectedRequisition.status === 'RECEIVED'
+                              ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                              : selectedRequisition.status === 'APPROVED' || selectedRequisition.status === 'ORDERED'
+                              ? 'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                              : selectedRequisition.status === 'REJECTED'
+                              ? 'bg-rose-500/10 text-rose-600 border-rose-500/30'
+                              : 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                          }`}
+                        >
+                          {selectedRequisition.status}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Requested by <strong>{selectedRequisition.requested_by_name}</strong> (
+                      {getRoleLabel(selectedRequisition.requested_by_role)}) on{' '}
+                      {new Date(selectedRequisition.created_at).toLocaleString('en-KE')}
                     </p>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                      Admin / Supplier Notes
-                    </label>
-                    <input
-                      type="text"
-                      value={adminNoteInput}
-                      onChange={(e) => setAdminNoteInput(e.target.value)}
-                      placeholder="E.g. Delivery truck arriving 2pm Tuesday..."
-                      className="w-full mt-1 bg-white dark:bg-slate-900 text-xs rounded-xl p-2.5 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
-                    />
+                  {/* Admin Delete Action */}
+                  {isAdminOrSupervisor && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRequisition(selectedRequisition.id)}
+                      className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900/40 text-xs font-bold flex items-center gap-1.5 self-start cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Delete Requisition</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Communication & Actions Toolbar */}
+                <div className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* WhatsApp Admin */}
+                    <button
+                      type="button"
+                      onClick={() => setShowWhatsAppModal(true)}
+                      className="px-3.5 py-2 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 font-black text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
+                      title="Notify Admin via WhatsApp"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>WhatsApp Admin</span>
+                    </button>
+
+                    {/* Email Admin */}
+                    <button
+                      type="button"
+                      onClick={() => setShowEmailModal(true)}
+                      className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
+                      title="Send Requisition via Email"
+                    >
+                      <Mail className="w-4 h-4" />
+                      <span>Email Requisition</span>
+                    </button>
+
+                    {/* Print Restock Slip */}
+                    <button
+                      type="button"
+                      onClick={() => setShowPrintModal(true)}
+                      className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 text-white dark:text-slate-900 font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer transition-all active:scale-95"
+                      title="Print Restock Order Slip"
+                    >
+                      <Printer className="w-4 h-4 text-amber-400 dark:text-amber-600" />
+                      <span>Print Slip</span>
+                    </button>
                   </div>
 
-                  {/* Status Change Buttons */}
-                  <div className="flex flex-wrap gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    {/* PDF Download */}
                     <button
                       type="button"
-                      onClick={() => handleUpdateStatus('APPROVED')}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                        selectedRequisition.status === 'APPROVED'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 hover:bg-blue-200'
-                      }`}
+                      onClick={() => exportRequisitionPDF(selectedRequisition, storeConfig)}
+                      className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                      title="Export as PDF Document"
                     >
-                      Mark Approved
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>PDF</span>
                     </button>
 
+                    {/* Excel Download */}
                     <button
                       type="button"
-                      onClick={() => handleUpdateStatus('ORDERED')}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                        selectedRequisition.status === 'ORDERED'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-200'
-                      }`}
+                      onClick={() => exportRequisitionExcel(selectedRequisition, storeConfig)}
+                      className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                      title="Export as Excel Spreadsheet"
                     >
-                      Mark Ordered with Distributor
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateStatus('RECEIVED')}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                        selectedRequisition.status === 'RECEIVED'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm'
-                      }`}
-                    >
-                      <Check className="w-3.5 h-3.5 inline mr-1" />
-                      Mark Received &amp; Restock Bottles
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleUpdateStatus('REJECTED')}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
-                        selectedRequisition.status === 'REJECTED'
-                          ? 'bg-rose-600 text-white'
-                          : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 hover:bg-rose-200'
-                      }`}
-                    >
-                      Reject Request
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>Excel</span>
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
-                  <p>
-                    This requisition is under review by the store administrator. When approved and received,
-                    inventory counts will update automatically.
-                  </p>
+
+                {/* Summary Stats Overview */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Products Listed</div>
+                    <div className="text-base font-black text-slate-900 dark:text-white font-mono mt-0.5">
+                      {selectedRequisition.items.length} items
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Total Units to Order</div>
+                    <div className="text-base font-black text-amber-600 font-mono mt-0.5">
+                      {totalRequestedUnits} units
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Delivered &amp; Restocked</div>
+                    <div className="text-base font-black text-emerald-600 font-mono mt-0.5">
+                      {totalDeliveredUnits} units ({fulfilledItems.length} items)
+                    </div>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">Priority / Urgency</div>
+                    <div
+                      className={`text-base font-black font-mono mt-0.5 ${
+                        selectedRequisition.urgency === 'HIGH' ||
+                        selectedRequisition.urgency === 'CRITICAL' ||
+                        selectedRequisition.urgency === 'URGENT'
+                          ? 'text-rose-600'
+                          : 'text-blue-600'
+                      }`}
+                    >
+                      {selectedRequisition.urgency}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          ) : (
+
+                {/* Delivery Verification Checklist Section */}
+                <div className="p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <CheckSquare className="w-4 h-4 text-emerald-600" />
+                        <span>Individual Delivery Verification Checkmarks</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Check the products delivered by the supplier. Only confirmed checkmarks are added to active inventory stock.
+                      </p>
+                    </div>
+
+                    {unfulfilledItems.length > 0 && selectedRequisition.status !== 'REJECTED' && (
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAllDeliveryChecks(true)}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 cursor-pointer transition-colors"
+                        >
+                          Select All Pending
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAllDeliveryChecks(false)}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 border border-slate-200 dark:border-slate-700 cursor-pointer transition-colors"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Progress Bar */}
+                  {fulfilledItems.length > 0 && (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-700 dark:text-slate-300">
+                          Fulfillment Progress: {fulfilledItems.length} of {selectedRequisition.items.length} products restocked
+                        </span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {Math.round((fulfilledItems.length / selectedRequisition.items.length) * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                          style={{
+                            width: `${(fulfilledItems.length / selectedRequisition.items.length) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Products Table with Checkmarks */}
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                    {selectedRequisition.items.map((item, idx) => {
+                      const isDelivered = !!item.stock_added;
+                      const isChecked = !isDelivered && !!deliveryChecks[item.product_id];
+                      const currentDeliveryQty = deliveryQuantities[item.product_id] ?? item.requested_qty;
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3.5 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                            isDelivered
+                              ? 'bg-emerald-50/50 dark:bg-emerald-950/20'
+                              : isChecked
+                              ? 'bg-amber-50/30 dark:bg-amber-950/15'
+                              : 'bg-white dark:bg-slate-900 opacity-75'
+                          }`}
+                        >
+                          {/* Checkmark & Info */}
+                          <div className="flex items-start sm:items-center gap-3">
+                            {isDelivered ? (
+                              <div
+                                className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs"
+                                title="Delivered and stock added to inventory"
+                              >
+                                <Check className="w-4 h-4 stroke-[3]" />
+                              </div>
+                            ) : (
+                              <label
+                                className="flex items-center gap-2 cursor-pointer select-none"
+                                title={isChecked ? 'Checked: will be added to inventory' : 'Unchecked: not yet delivered'}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleDeliveryCheck(item.product_id)}
+                                  disabled={selectedRequisition.status === 'REJECTED'}
+                                  className="w-5 h-5 rounded-md border-2 border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                              </label>
+                            )}
+
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-slate-900 dark:text-white">
+                                  {item.product_name}
+                                </span>
+                                {isDelivered ? (
+                                  <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                    Restocked
+                                  </span>
+                                ) : isChecked ? (
+                                  <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                                    Ready to Restock
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                                    Undelivered
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
+                                <span>Category: <strong>{item.category || 'Liquor'}</strong></span>
+                                <span>•</span>
+                                <span>Current In-Stock: <strong>{item.current_stock}</strong> {item.unit}s</span>
+                                <span>•</span>
+                                <span>Order Requested: <strong>{item.requested_qty}</strong> {item.unit}s</span>
+                                {isDelivered && item.delivered_at && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                      Received {new Date(item.delivered_at).toLocaleDateString('en-KE')}
+                                      {item.delivered_by_name ? ` by ${item.delivered_by_name}` : ''}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action / Quantities */}
+                          <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-10 sm:pl-0">
+                            {isDelivered ? (
+                              <div className="text-right">
+                                <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">
+                                  +{item.fulfilled_qty || item.requested_qty} {item.unit}s in stock
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                {isChecked ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] uppercase font-bold text-slate-500">Delivered:</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeliveryQtyChange(item.product_id, currentDeliveryQty - 1)}
+                                      disabled={currentDeliveryQty <= 1}
+                                      className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs disabled:opacity-30 cursor-pointer"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={currentDeliveryQty}
+                                      onChange={(e) =>
+                                        handleDeliveryQtyChange(
+                                          item.product_id,
+                                          parseInt(e.target.value) || 1
+                                        )
+                                      }
+                                      className="w-12 text-center font-mono font-black text-xs py-1 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeliveryQtyChange(item.product_id, currentDeliveryQty + 1)}
+                                      className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 flex items-center justify-center font-bold text-xs cursor-pointer"
+                                    >
+                                      +
+                                    </button>
+                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                                      +{currentDeliveryQty} {item.unit}s
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs font-semibold text-slate-400 italic">
+                                    Not checked (0 to stock)
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Notes Card */}
+                {selectedRequisition.notes && (
+                  <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Staff Notes
+                    </span>
+                    <p className="text-xs text-slate-800 dark:text-slate-200">
+                      {selectedRequisition.notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* Fulfillment & Inventory Restock Status Banner */}
+                {isAllFulfilled ? (
+                  <div className="p-5 bg-emerald-50 dark:bg-emerald-950/20 border-2 border-emerald-500/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                          <span>All Products Verified &amp; Added to Inventory</span>
+                        </div>
+                        <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
+                          Received by <strong>{selectedRequisition.fulfilled_by_name || selectedRequisition.requested_by_name}</strong>
+                          {selectedRequisition.fulfilled_by_role && ` (${getRoleLabel(selectedRequisition.fulfilled_by_role)})`}
+                          {selectedRequisition.fulfilled_at && (
+                            <span> • {new Date(selectedRequisition.fulfilled_at).toLocaleString('en-KE')}</span>
+                          )}
+                        </p>
+                        {selectedRequisition.fulfillment_notes && (
+                          <p className="text-xs text-slate-700 dark:text-slate-300 mt-1 italic bg-white/70 dark:bg-slate-900/60 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
+                            &ldquo;{selectedRequisition.fulfillment_notes}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <span className="self-start sm:self-center px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-black rounded-xl uppercase tracking-wider shadow-xs shrink-0 flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Fully Restocked</span>
+                    </span>
+                  </div>
+                ) : selectedRequisition.status !== 'REJECTED' ? (
+                  /* Primary Physical Delivery Receiving Button for Cashiers & Admin */
+                  <div className="p-5 bg-emerald-50/50 dark:bg-emerald-950/20 border-2 border-dashed border-emerald-500/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-emerald-600" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                          Confirm Physical Delivery &amp; Auto-Restock
+                        </h4>
+                        {fulfilledItems.length > 0 && (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            {fulfilledItems.length} of {selectedRequisition.items.length} Delivered
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        {checkedUnfulfilledItems.length > 0
+                          ? `Ready to confirm ${checkedUnfulfilledItems.length} checked product(s). This will immediately add +${totalCheckedUnits} bottle units directly to active inventory stock.`
+                          : 'Check the products delivered by the distributor above to automatically add them to active inventory.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleFulfillRequisition}
+                      disabled={checkedUnfulfilledItems.length === 0}
+                      className={`px-4 py-2.5 font-black text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95 shrink-0 ${
+                        checkedUnfulfilledItems.length > 0
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed'
+                      }`}
+                    >
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>
+                        {checkedUnfulfilledItems.length > 0
+                          ? `Confirm Delivery (+${totalCheckedUnits} Bottles to Inventory)`
+                          : 'Check Delivered Products Above'}
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
+
+                {/* Admin Action Review Panel */}
+                {isAdminOrSupervisor ? (
+                  <div className="p-5 bg-amber-50/50 dark:bg-amber-950/20 border-2 border-amber-500/30 rounded-2xl space-y-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <Building2 className="w-4 h-4 text-amber-600" />
+                        Administrator Review &amp; Status Controls
+                      </h4>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                        Manage supplier fulfillment workflow. Confirming checked delivery will automatically restock inventory.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Admin / Supplier Notes
+                      </label>
+                      <input
+                        type="text"
+                        value={adminNoteInput}
+                        onChange={(e) => setAdminNoteInput(e.target.value)}
+                        placeholder="E.g. Delivery truck arriving 2pm Tuesday..."
+                        className="w-full mt-1 bg-white dark:bg-slate-900 text-xs rounded-xl p-2.5 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    {/* Status Change Buttons */}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateStatus('APPROVED')}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                          selectedRequisition.status === 'APPROVED'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 hover:bg-blue-200'
+                        }`}
+                      >
+                        Mark Approved
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateStatus('ORDERED')}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                          selectedRequisition.status === 'ORDERED'
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 hover:bg-purple-200'
+                        }`}
+                      >
+                        Mark Ordered with Distributor
+                      </button>
+
+                      {!isAllFulfilled && (
+                        <button
+                          type="button"
+                          onClick={handleFulfillRequisition}
+                          disabled={checkedUnfulfilledItems.length === 0}
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm cursor-pointer transition-colors flex items-center gap-1.5"
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>
+                            {checkedUnfulfilledItems.length > 0
+                              ? `Confirm Checked (${checkedUnfulfilledItems.length}) & Restock`
+                              : 'Check Products to Restock'}
+                          </span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateStatus('REJECTED')}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                          selectedRequisition.status === 'REJECTED'
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 hover:bg-rose-200'
+                        }`}
+                      >
+                        Reject Request
+                      </button>
+                    </div>
+                  </div>
+                ) : !isAllFulfilled ? (
+                  <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+                    <p>
+                      This requisition is currently <strong>{selectedRequisition.status}</strong>. When delivery arrives from the distributor,
+                      check the delivered items and click &quot;Confirm Physical Delivery &amp; Auto-Restock&quot; above to automatically update inventory counts.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })() : (
             /* EMPTY WORKSPACE STATE */
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400">
               <ClipboardList className="w-14 h-14 opacity-25 mb-3" />

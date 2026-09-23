@@ -804,39 +804,37 @@ export function exportRequisitionPDF(req: Requisition, storeConfig: StoreConfig)
   }
 
   const tableBody = req.items.map((item, idx) => {
-    const estCost = item.estimated_cost || 0;
-    const estTotal = estCost * item.requested_qty;
+    const statusText = item.stock_added
+      ? `[✓] Received (+${item.fulfilled_qty || item.requested_qty})`
+      : '[   ] Pending';
     return [
       (idx + 1).toString(),
       item.product_name,
       item.category || 'Liquor',
-      `${item.current_stock} ${item.unit}s`,
-      `${item.requested_qty} ${item.unit}s`,
-      estCost > 0 ? `KES ${estCost.toLocaleString()}` : '-',
-      estTotal > 0 ? `KES ${estTotal.toLocaleString()}` : '-',
-      '[   ]', // Checkbox for physical receiving verification
+      `${item.current_stock}`,
+      `${item.requested_qty}`,
+      item.unit || 'Bottle',
+      statusText,
     ];
   });
 
   const totalQty = req.items.reduce((sum, it) => sum + it.requested_qty, 0);
-  const totalCost = req.items.reduce((sum, it) => sum + ((it.estimated_cost || 0) * it.requested_qty), 0);
 
   autoTable(doc, {
     startY: startY + 26,
-    head: [['#', 'Product Name', 'Category', 'In-Stock', 'Order Qty', 'Est. Unit Cost', 'Est. Total', 'Received [x]']],
+    head: [['#', 'Product Name', 'Category', 'Current In-Stock', 'Order Qty', 'Unit', 'Physical Received [ ]']],
     body: tableBody,
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2.5, textColor: [30, 41, 59] },
+    styles: { fontSize: 8.5, cellPadding: 3, textColor: [30, 41, 59] },
     headStyles: { fillColor: themeRgb, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'left' },
     columnStyles: {
       0: { halign: 'center', cellWidth: 10 },
-      1: { cellWidth: 50 },
-      2: { cellWidth: 25 },
-      3: { halign: 'center', cellWidth: 20 },
-      4: { halign: 'center', cellWidth: 20, fontStyle: 'bold' },
-      5: { halign: 'right', cellWidth: 22 },
-      6: { halign: 'right', cellWidth: 22, fontStyle: 'bold' },
-      7: { halign: 'center', cellWidth: 13 },
+      1: { cellWidth: 65 },
+      2: { cellWidth: 30 },
+      3: { halign: 'center', cellWidth: 24 },
+      4: { halign: 'center', cellWidth: 22, fontStyle: 'bold' },
+      5: { halign: 'center', cellWidth: 16 },
+      6: { halign: 'center', cellWidth: 15 },
     },
     alternateRowStyles: { fillColor: [248, 250, 252] },
   });
@@ -851,10 +849,8 @@ export function exportRequisitionPDF(req: Requisition, storeConfig: StoreConfig)
   doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
   doc.text(`Total Products: ${req.items.length}`, 18, lastY + 6.5);
-  doc.text(`Total Units to Restock: ${totalQty}`, 70, lastY + 6.5);
-  if (totalCost > 0) {
-    doc.text(`Total Estimated Cost: KES ${totalCost.toLocaleString()}`, 130, lastY + 6.5);
-  }
+  doc.text(`Total Units to Restock: ${totalQty} units`, 75, lastY + 6.5);
+  doc.text(`Status: ${req.status}`, 145, lastY + 6.5);
 
   // Signatures
   const sigY = lastY + 22;
@@ -886,12 +882,10 @@ export function exportRequisitionExcel(req: Requisition, storeConfig: StoreConfi
     [`Requested By: ${req.requested_by_name} (${req.requested_by_role})`, ''],
     req.notes ? [`Notes: ${req.notes}`, ''] : ['', ''],
     [],
-    ['#', 'Product Name', 'Category', 'Current Stock', 'Requested Order Qty', 'Unit', 'Est. Unit Cost (KES)', 'Est. Total Cost (KES)', 'Received Status'],
+    ['#', 'Product Name', 'Category', 'Current In-Stock', 'Requested Order Qty', 'Unit', 'Fulfillment Received Status'],
   ];
 
   const dataRows = req.items.map((item, idx) => {
-    const estCost = item.estimated_cost || 0;
-    const estTotal = estCost * item.requested_qty;
     return [
       idx + 1,
       item.product_name,
@@ -899,29 +893,29 @@ export function exportRequisitionExcel(req: Requisition, storeConfig: StoreConfi
       item.current_stock,
       item.requested_qty,
       item.unit || 'Bottle',
-      estCost,
-      estTotal,
-      '',
+      item.stock_added
+        ? `FULFILLED (+${item.fulfilled_qty || item.requested_qty})`
+        : 'PENDING RECEIPT',
     ];
   });
 
   const totalQty = req.items.reduce((sum, it) => sum + it.requested_qty, 0);
-  const totalCost = req.items.reduce((sum, it) => sum + ((it.estimated_cost || 0) * it.requested_qty), 0);
+  const deliveredQty = req.items
+    .filter((it) => it.stock_added)
+    .reduce((sum, it) => sum + (it.fulfilled_qty || it.requested_qty), 0);
 
-  const summaryRow = ['TOTAL', '', '', '', totalQty, '', '', totalCost, ''];
+  const summaryRow = ['TOTAL', '', '', '', totalQty, 'Units', `DELIVERED: ${deliveredQty} Units`];
 
   const ws = XLSX.utils.aoa_to_sheet([...headerRows, ...dataRows, [], summaryRow]);
 
   ws['!cols'] = [
     { wch: 6 },
-    { wch: 35 },
+    { wch: 38 },
+    { wch: 20 },
     { wch: 18 },
+    { wch: 22 },
     { wch: 14 },
-    { wch: 20 },
-    { wch: 12 },
-    { wch: 18 },
-    { wch: 20 },
-    { wch: 18 },
+    { wch: 26 },
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, req.requisition_no);
