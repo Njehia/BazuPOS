@@ -12,9 +12,13 @@ import {
   Smartphone,
   User,
   X,
+  Bluetooth,
+  Usb,
+  Loader2,
 } from 'lucide-react';
 import { Sale, SaleItem, StoreConfig } from '../types';
 import { maskPhoneNumber } from '../lib/phoneUtils';
+import { printViaWebBluetooth, printViaWebUSB } from '../lib/escpos';
 
 interface ReceiptModalProps {
   sale: Sale;
@@ -37,9 +41,48 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 }) => {
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
   const [copied, setCopied] = useState(false);
+  const [isBluetoothPrinting, setIsBluetoothPrinting] = useState(false);
+  const [isUsbPrinting, setIsUsbPrinting] = useState(false);
+  const [hardwarePrintFeedback, setHardwarePrintFeedback] = useState<string | null>(null);
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleBluetoothPrint = async () => {
+    setIsBluetoothPrinting(true);
+    setHardwarePrintFeedback(null);
+    try {
+      const res = await printViaWebBluetooth({
+        storeConfig: { ...storeConfig, receipt_printer_width: paperWidth },
+        sale,
+        items,
+      });
+      setHardwarePrintFeedback(res.message);
+    } catch (e: any) {
+      setHardwarePrintFeedback(e?.message || 'Bluetooth print failed');
+    } finally {
+      setIsBluetoothPrinting(false);
+      setTimeout(() => setHardwarePrintFeedback(null), 3500);
+    }
+  };
+
+  const handleUsbPrint = async () => {
+    setIsUsbPrinting(true);
+    setHardwarePrintFeedback(null);
+    try {
+      const res = await printViaWebUSB({
+        storeConfig: { ...storeConfig, receipt_printer_width: paperWidth },
+        sale,
+        items,
+      });
+      setHardwarePrintFeedback(res.message);
+    } catch (e: any) {
+      setHardwarePrintFeedback(e?.message || 'USB print failed');
+    } finally {
+      setIsUsbPrinting(false);
+      setTimeout(() => setHardwarePrintFeedback(null), 3500);
+    }
   };
 
   const formattedDate = new Date(sale.created_at).toLocaleString('en-KE', {
@@ -279,13 +322,28 @@ Thank you for your business! 🍷`;
               <div className="flex justify-between">
                 <span>Payment:</span>
                 <span className="font-black text-black">
-                  {sale.payment_method === 'MPESA'
+                  {sale.payment_method === 'SPLIT'
+                    ? 'SPLIT (CASH + M-PESA)'
+                    : sale.payment_method === 'MPESA'
                     ? 'M-PESA EXPRESS'
                     : sale.payment_method === 'DEBT'
                     ? 'CREDIT / DEBT'
                     : 'CASH'}
                 </span>
               </div>
+
+              {sale.payment_method === 'SPLIT' && (
+                <div className="bg-stone-100 p-1.5 rounded space-y-0.5 text-xs text-black">
+                  <div className="flex justify-between font-bold">
+                    <span>Cash Tender:</span>
+                    <span className="font-mono">KES {(sale.split_cash_amount || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between font-bold">
+                    <span>M-Pesa Express:</span>
+                    <span className="font-mono">KES {(sale.split_mpesa_amount || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
 
               {sale.payment_status && (
                 <div className="flex justify-between">
@@ -318,7 +376,19 @@ Thank you for your business! 🍷`;
                 <tbody className="divide-y divide-black/30">
                   {items.map((item, idx) => (
                     <tr key={`receipt-row-${item.id || item.product_id || idx}-${idx}`} className="text-xs font-bold text-black">
-                      <td className="py-1.5 font-bold max-w-[130px] truncate">{item.product_name}</td>
+                      <td className="py-1.5 font-bold max-w-[130px]">
+                        <div className="truncate">{item.product_name}</div>
+                        {item.variant_name && (
+                          <div className="text-[10px] text-stone-600 font-normal italic">
+                            Variant: {item.variant_name}
+                          </div>
+                        )}
+                        {item.notes && (
+                          <div className="text-[10px] text-stone-600 font-normal italic">
+                            Note: {item.notes}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-1.5 text-center font-mono">{item.quantity}</td>
                       <td className="py-1.5 text-right font-mono">{item.unit_price.toLocaleString()}</td>
                       <td className="py-1.5 text-right font-mono font-black">{item.total_price.toLocaleString()}</td>
@@ -392,15 +462,55 @@ Thank you for your business! 🍷`;
           </div>
         </div>
 
+        {hardwarePrintFeedback && (
+          <div className="px-4 py-2 bg-slate-900 text-amber-300 text-xs text-center font-bold flex items-center justify-center gap-1.5 animate-fade-in border-t border-slate-800">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{hardwarePrintFeedback}</span>
+          </div>
+        )}
+
         {/* Action Buttons */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap gap-2.5">
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap gap-2">
+          {/* Browser System Print */}
           <button
             type="button"
             onClick={handlePrint}
-            className="flex-1 py-3 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer shadow-xs"
+            className="flex-1 py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer shadow-xs min-w-[90px]"
           >
             <Printer className="w-4 h-4 text-amber-400" />
-            <span>Print</span>
+            <span>System Print</span>
+          </button>
+
+          {/* Web Bluetooth Thermal Print */}
+          <button
+            type="button"
+            onClick={handleBluetoothPrint}
+            disabled={isBluetoothPrinting}
+            className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            title="Send raw ESC/POS commands directly to 58mm/80mm Bluetooth printer"
+          >
+            {isBluetoothPrinting ? (
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
+            ) : (
+              <Bluetooth className="w-4 h-4 text-blue-200" />
+            )}
+            <span>Bluetooth</span>
+          </button>
+
+          {/* WebUSB Thermal Print */}
+          <button
+            type="button"
+            onClick={handleUsbPrint}
+            disabled={isUsbPrinting}
+            className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            title="Send raw ESC/POS commands directly to USB thermal printer"
+          >
+            {isUsbPrinting ? (
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
+            ) : (
+              <Usb className="w-4 h-4 text-emerald-200" />
+            )}
+            <span>USB POS</span>
           </button>
 
           {/* WhatsApp share button */}

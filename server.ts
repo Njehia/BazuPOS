@@ -75,30 +75,22 @@ async function startServer() {
       // Clean base64 data prefix if present
       const cleanBase64 = fileBase64.replace(/^data:[^;]+;base64,/, '');
 
-      const prompt = `You are an expert retail liquor store inventory auditor in Kenya.
-Analyze the attached document or photo (which may be an alcohol delivery invoice, supplier delivery note from EABL/KBL/UDV/Pernod Ricard/distributors, handwritten restock slip, or photo of shelves/crates).
+      const prompt = `You are an expert retail store and liquor POS inventory auditor.
+Carefully examine the attached receipt, supplier invoice, delivery note, order slip, or document.
 
-Extract all liquor, beer, wine, spirit, or beverage restock items.
-Return ONLY valid JSON matching this schema:
-{
-  "items": [
-    {
-      "name": "Full product brand name and volume (e.g., Tusker Lager 500ml, Gilbeys Gin 750ml, Johnnie Walker Black 750ml, White Cap 500ml, Chrome Gin 250ml, Smirnoff Red 750ml)",
-      "category": "Beer | Whisky | Gin | Vodka | Wine | Rum | Brandy | Tequila | Liqueur | Cider | Soft Drinks | General",
-      "quantity": 24, // integer count of bottles/units received
-      "unit": "Bottle | Can | Pack | Crate | 500ml | 750ml | 1L",
-      "cost_price": 200, // unit cost price in KES if visible, otherwise null
-      "selling_price": 250, // retail selling price in KES if visible, otherwise null
-      "barcode": "" // barcode if visible, otherwise empty string
-    }
-  ],
-  "confidence": "HIGH | MEDIUM | LOW",
-  "supplier_name": "Supplier or distributor name if discernible, else null",
-  "invoice_number": "Invoice / Order # if discernible, else null",
-  "notes": "Brief extraction notes or summary"
-}
-
-If crate quantities are listed (e.g., '2 crates of 24'), calculate total bottle units (e.g., 48 bottles). Ensure quantities are positive numbers.`;
+CRITICAL EXTRACTION RULES:
+1. ONLY extract the actual product line items visible in the provided image or document.
+2. DO NOT invent, hallucinate, or copy example product names. If no items or text can be deciphered, return an empty array: {"items": []}.
+3. Extract the exact product description / brand name and pack size (e.g. "Heineken 500ml", "Gilbeys Gin 750ml", "Tusker Lager 500ml", "Captain Morgan Gold 750ml").
+4. For each item:
+   - "name": Clean, exact product name with volume or size if indicated.
+   - "category": Detected category (e.g. "Beer", "Cider", "Whisky", "Gin", "Vodka", "Wine", "Rum", "Brandy", "Liqueur", "Soft Drinks", "General").
+   - "quantity": The exact quantity delivered/purchased. If crates/cases/cartons are specified (e.g. "2 crates of 24" or "1 case 12x750ml"), calculate the total individual unit count (e.g. 48 or 12). If simply "10", output 10.
+   - "unit": "Bottle", "Can", "Pack", "Box", "Pieces", etc.
+   - "cost_price": Unit purchase or wholesale cost in KES if visible on invoice, otherwise null.
+   - "selling_price": Suggested or retail selling price if visible, otherwise null.
+   - "barcode": Barcode number if visible on the document, otherwise null.
+5. Extract metadata if visible: supplier name, invoice number, notes.`;
 
       const imagePart = {
         inlineData: {
@@ -111,8 +103,8 @@ If crate quantities are listed (e.g., '2 crates of 24'), calculate total bottle 
         text: prompt,
       };
 
+      // Prioritize gemini-3.1-flash-lite (fast & robust for multimodal extraction), with gemini-3.8-flash as fallback
       const CANDIDATE_MODELS = [
-        'gemini-flash-latest',
         'gemini-3.1-flash-lite',
         'gemini-3.8-flash',
       ];
@@ -186,7 +178,12 @@ If crate quantities are listed (e.g., '2 crates of 24'), calculate total bottle 
   // Vite middleware for dev or static serving for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      configFile: path.resolve(__dirname, 'vite.config.ts'),
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        watch: null,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

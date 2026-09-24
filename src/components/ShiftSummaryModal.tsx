@@ -33,6 +33,7 @@ import {
 } from '../types';
 import { LocalDb } from '../lib/storage';
 import { exportShiftReportExcel, exportShiftReportPDF } from '../lib/exportUtils';
+import { buildESCPOSShiftReport } from '../lib/escpos';
 
 interface ShiftSummaryModalProps {
   isOpen: boolean;
@@ -266,6 +267,31 @@ export const ShiftSummaryModal: React.FC<ShiftSummaryModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Mid-Shift X-Report Button */}
+            <button
+              id="print-x-report-btn"
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors shadow-xs"
+              title="Print Mid-Shift X-Report (Audits current cash & sales totals without resetting counters)"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>X-Report</span>
+            </button>
+
+            {/* End-of-Day Z-Report Button */}
+            <button
+              id="close-shift-z-report-btn"
+              type="button"
+              onClick={() => setShowCloseShiftModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-colors shadow-xs"
+              title="Generate End-of-Day Z-Report (Closes shift, counts cash drawer, and finalizes audit)"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Z-Report</span>
+            </button>
+
             <button
               id="export-pdf-shift-btn"
               type="button"

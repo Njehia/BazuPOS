@@ -183,7 +183,9 @@ export const LoginAuthScreen: React.FC<LoginAuthScreenProps> = ({ onAuthenticate
             <span className="text-amber-500">BAZU</span>
             <span className="text-slate-900 dark:text-white">POS</span>
           </h1>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Nairobi Liquor POS Terminal & Inventory</p>
+          <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mt-1">
+            {LocalDb.getStoreConfig().store_name || 'Retail Point of Sale & Inventory'}
+          </p>
         </div>
 
         {/* Error Notification */}

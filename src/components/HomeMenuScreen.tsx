@@ -13,6 +13,7 @@ import {
   Key,
   LogOut,
   Package,
+  Plus,
   Printer,
   ShieldCheck,
   ShoppingBag,
@@ -296,6 +297,43 @@ export const HomeMenuScreen: React.FC<HomeMenuScreenProps> = ({
                 <span>Resume Order</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
+            </div>
+          )}
+
+          {/* Empty Inventory Setup Prompt */}
+          {stats.totalProducts === 0 && (
+            <div className="mt-4 pt-4 border-t border-indigo-900/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-500/10 -mx-5 -mb-5 sm:-mx-6 sm:-mb-6 p-4 rounded-b-2xl border-amber-500/30">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-xs">
+                  <Package className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-amber-300">
+                    Store Catalog Empty: Ready to Stock Up
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    Scan distributor receipts to auto-extract items, or add products manually.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('smart-stock')}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Scan Receipt</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('inventory')}
+                  className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Product</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

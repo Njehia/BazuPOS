@@ -42,7 +42,7 @@ export const StoreSwitcherModal: React.FC<StoreSwitcherModalProps> = ({
 
   if (!isOpen) return null;
 
-  const activeStoreId = LocalDb.getStoreConfig().store_id || 'the_buzz_liquor';
+  const activeStoreId = LocalDb.getStoreConfig().store_id || 'store_main';
 
   const handleSelectStore = (storeId: string, storeName: string, branch: string) => {
     const newConfig = LocalDb.switchStore(storeId, storeName, branch);

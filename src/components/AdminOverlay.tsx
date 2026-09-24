@@ -38,6 +38,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Smartphone,
+  Sparkles,
   ScanLine,
   Store,
   Tags,
@@ -77,6 +78,7 @@ import { THEME_PRESETS_LIST, applyStoreTheme, getThemeDetails, useThemeMode } fr
 import { ThemeToggle } from './ThemeToggle';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
+import { FirstTimeSetupModal } from './FirstTimeSetupModal';
 
 export type AdminTab = 'inventory' | 'requisitions' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
@@ -160,6 +162,7 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   // Store config state
   const [storeConfig, setStoreConfig] = useState<StoreConfig>(() => LocalDb.getStoreConfig());
   const [configSuccessMsg, setConfigSuccessMsg] = useState(false);
+  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
 
   // User Management State
   const [users, setUsers] = useState<User[]>(() => LocalDb.getUsers());
@@ -2665,14 +2668,26 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
         {/* TAB 4: STORE CUSTOMIZATION */}
         {activeTab === 'store' && (
           <div className="max-w-2xl mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-            <div className="mb-6">
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Store className="w-5 h-5 text-amber-500" />
-                Store Configuration & Receipt Branding
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Customizes store details saved into the local SQLite `store_config` table
-              </p>
+            <div className="mb-6 flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Store className="w-5 h-5 text-amber-500" />
+                  Store Configuration & Receipt Branding
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Customizes store details, receipt headers, and branch credentials.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSetupWizardOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Open guided first-time setup wizard"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Run Setup Wizard</span>
+              </button>
             </div>
 
             <form onSubmit={handleSaveConfig} className="space-y-4 text-xs">
@@ -4155,6 +4170,22 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
           onShiftClosed={() => {
             onInventoryChanged();
             setSummaryData(LocalDb.getDailySummary());
+          }}
+        />
+      )}
+
+      {/* STORE SETUP WIZARD MODAL */}
+      {isSetupWizardOpen && (
+        <FirstTimeSetupModal
+          isOpen={isSetupWizardOpen}
+          canClose={true}
+          onClose={() => setIsSetupWizardOpen(false)}
+          onComplete={() => {
+            setIsSetupWizardOpen(false);
+            const fresh = LocalDb.getStoreConfig();
+            setStoreConfig(fresh);
+            onStoreConfigChanged(fresh);
+            onInventoryChanged();
           }}
         />
       )}

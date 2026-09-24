@@ -61,6 +61,7 @@ import { BazuLogo } from './BazuLogo';
 import { HomeMenuScreen } from './HomeMenuScreen';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ThemeToggle } from './ThemeToggle';
+import { FirstTimeSetupModal } from './FirstTimeSetupModal';
 
 interface PosTerminalProps {
   currentUser: UserModel;
@@ -103,6 +104,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
   const [activeUser, setActiveUser] = useState<UserModel>(currentUser);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isShiftSummaryOpen, setIsShiftSummaryOpen] = useState(false);
+  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
 
   // Admin PIN prompt if salesperson tries to open admin
@@ -911,7 +913,49 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
 
               {/* Product Grid */}
               <div className="flex-1 overflow-y-auto p-4">
-                {filteredProducts.length === 0 ? (
+                {products.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto my-auto space-y-4">
+                    <div className="w-16 h-16 rounded-3xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-inner">
+                      <Package className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        Inventory is Currently Empty
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+                        Stock your store catalog by scanning a distributor receipt/invoice or adding products manually.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsSmartStockOpen(true)}
+                        className="w-full sm:flex-1 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>Scan Receipt / Invoice</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAdmin('inventory')}
+                        className="w-full sm:flex-1 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Add Product</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsSetupWizardOpen(true)}
+                      className="text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 font-bold hover:underline cursor-pointer pt-1"
+                    >
+                      Store Setup Wizard
+                    </button>
+                  </div>
+                ) : filteredProducts.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 text-xs space-y-2 py-12">
                     <Package className="w-12 h-12 text-slate-300 dark:text-slate-600" />
                     <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No products match your search or filter.</p>
@@ -1446,6 +1490,20 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
             </form>
           </div>
         </div>
+      )}
+
+      {/* STORE SETUP WIZARD MODAL */}
+      {isSetupWizardOpen && (
+        <FirstTimeSetupModal
+          isOpen={isSetupWizardOpen}
+          canClose={true}
+          onClose={() => setIsSetupWizardOpen(false)}
+          onComplete={() => {
+            setIsSetupWizardOpen(false);
+            setStoreConfig(LocalDb.getStoreConfig());
+            refreshInventory();
+          }}
+        />
       )}
     </div>
   );

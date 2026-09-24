@@ -28,6 +28,7 @@ import {
   ShiftStatus,
   ShiftSummaryReport,
   ShiftMpesaTransaction,
+  DraftOrder,
 } from '../types';
 import {
   INITIAL_CATEGORIES,
@@ -39,20 +40,21 @@ import {
   getInitialSalesAndItems,
 } from '../data/seedData';
 import { CloudDb } from './firebase';
+import { offlineQueue } from './offlineQueue';
 
 function getActiveStoreId(): string {
-  if (typeof window === 'undefined') return 'the_buzz_liquor';
+  if (typeof window === 'undefined') return 'store_main';
   try {
-    return localStorage.getItem('bazu_pos_active_store_id') || 'the_buzz_liquor';
+    return localStorage.getItem('bazu_pos_active_store_id') || 'store_main';
   } catch {
-    return 'the_buzz_liquor';
+    return 'store_main';
   }
 }
 
 function getStoreKey(baseKey: string): string {
   const storeId = getActiveStoreId();
-  if (storeId === 'the_buzz_liquor') {
-    return baseKey; // Keeps existing backwards-compatibility with default store
+  if (storeId === 'store_main' || storeId === 'the_buzz_liquor') {
+    return baseKey; // Keeps backwards-compatibility with default store
   }
   return `${baseKey}_${storeId}`;
 }
@@ -120,9 +122,11 @@ export class LocalDb {
           localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(filtered));
           this.notifyListeners();
         } else {
-          // Cloud database empty: push initial catalog to Firestore
+          // Cloud database empty: push initial catalog to Firestore ONLY if local has products
           const localProds = this.getProducts();
-          CloudDb.batchSetProducts(localProds);
+          if (localProds && localProds.length > 0) {
+            CloudDb.batchSetProducts(localProds);
+          }
         }
       });
 
@@ -131,14 +135,6 @@ export class LocalDb {
         if (remoteSales && remoteSales.length > 0) {
           localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(remoteSales));
           this.notifyListeners();
-        } else {
-          // Seed cloud with initial sales history
-          const localSales = this.getSales();
-          const localItems = this.getSaleItems();
-          for (const s of localSales.slice(0, 10)) {
-            const items = localItems.filter((i) => i.sale_id === s.id);
-            CloudDb.recordSale(s, items);
-          }
         }
       });
 
@@ -170,7 +166,10 @@ export class LocalDb {
           localStorage.setItem(STORAGE_KEYS.STORE_CONFIG, JSON.stringify(remoteConfig));
           this.notifyListeners();
         } else {
-          CloudDb.setStoreConfig(this.getStoreConfig());
+          const cfg = this.getStoreConfig();
+          if (cfg && cfg.store_name) {
+            CloudDb.setStoreConfig(cfg);
+          }
         }
       });
 
@@ -846,15 +845,12 @@ export class LocalDb {
     const deletedIds = this.getDeletedProductIds();
     const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (!raw) {
-      const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initial));
-      return initial;
+      return [];
     }
     try {
       const parsed: Product[] = JSON.parse(raw);
       if (!Array.isArray(parsed)) {
-        const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
-        return initial;
+        return [];
       }
 
       const list = parsed.filter((p) => !deletedIds.has(Number(p.id)));
@@ -886,9 +882,7 @@ export class LocalDb {
       }
       return deduplicated;
     } catch {
-      const initial = INITIAL_PRODUCTS.filter((p) => !deletedIds.has(p.id));
-      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(initial));
-      return initial;
+      return [];
     }
   }
 
@@ -1041,41 +1035,24 @@ export class LocalDb {
   static getSales(): Sale[] {
     const raw = localStorage.getItem(STORAGE_KEYS.SALES);
     if (!raw) {
-      const initial = getInitialSalesAndItems();
-      localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(initial.sales));
-      localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(initial.items));
-      return initial.sales;
+      return [];
     }
     try {
       const parsed: Sale[] = JSON.parse(raw);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        const initial = getInitialSalesAndItems();
-        localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(initial.sales));
-        localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(initial.items));
-        return initial.sales;
-      }
-      return parsed;
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
-      const initial = getInitialSalesAndItems();
-      return initial.sales;
+      return [];
     }
   }
 
   static getSaleItems(saleId?: number): SaleItem[] {
     const raw = localStorage.getItem(STORAGE_KEYS.SALE_ITEMS);
     if (!raw) {
-      const initial = getInitialSalesAndItems();
-      localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(initial.sales));
-      localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(initial.items));
-      return saleId ? initial.items.filter((i) => i.sale_id === saleId) : initial.items;
+      return [];
     }
     try {
       const items: SaleItem[] = JSON.parse(raw);
-      if (!Array.isArray(items) || items.length === 0) {
-        const initial = getInitialSalesAndItems();
-        localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(initial.items));
-        return saleId ? initial.items.filter((i) => i.sale_id === saleId) : initial.items;
-      }
+      if (!Array.isArray(items)) return [];
       return saleId ? items.filter((i) => i.sale_id === saleId) : items;
     } catch {
       return [];
@@ -1149,10 +1126,11 @@ export class LocalDb {
     });
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
 
-    const totalAmount = cartItems.reduce(
-      (sum, item) => sum + item.product.price * item.quantity,
-      0
-    );
+    const totalAmount = cartItems.reduce((sum, item) => {
+      const unitPrice = item.selectedVariant?.price ?? item.product.price;
+      const discount = item.discountPercent ? (unitPrice * item.quantity * (item.discountPercent / 100)) : 0;
+      return sum + Math.max(0, (unitPrice * item.quantity) - discount);
+    }, 0);
 
     // Calculate actual payment and debt tracking
     const amountPaid =
@@ -1177,6 +1155,9 @@ export class LocalDb {
       cashier_name: saleData.cashier_name,
       total_amount: totalAmount,
       payment_method: saleData.payment_method,
+      split_cash_amount: saleData.split_cash_amount,
+      split_mpesa_amount: saleData.split_mpesa_amount,
+      split_other_amount: saleData.split_other_amount,
       created_at: new Date().toISOString(),
       mpesa_code: saleData.mpesa_code,
       cash_tendered: saleData.cash_tendered,
@@ -1190,15 +1171,22 @@ export class LocalDb {
       payment_status: paymentStatus,
     };
 
-    const newSaleItems: SaleItem[] = cartItems.map((ci, index) => ({
-      id: saleId + index + 1,
-      sale_id: saleId,
-      product_id: ci.product.id,
-      product_name: ci.product.name,
-      quantity: ci.quantity,
-      unit_price: ci.product.price,
-      total_price: ci.product.price * ci.quantity,
-    }));
+    const newSaleItems: SaleItem[] = cartItems.map((ci, index) => {
+      const unitPrice = ci.selectedVariant?.price ?? ci.product.price;
+      const discount = ci.discountPercent ? (unitPrice * ci.quantity * (ci.discountPercent / 100)) : 0;
+      const lineTotal = Math.max(0, (unitPrice * ci.quantity) - discount);
+      return {
+        id: saleId + index + 1,
+        sale_id: saleId,
+        product_id: ci.product.id,
+        product_name: ci.selectedVariant ? `${ci.product.name} (${ci.selectedVariant.name})` : ci.product.name,
+        variant_name: ci.selectedVariant?.name,
+        notes: ci.notes,
+        quantity: ci.quantity,
+        unit_price: unitPrice,
+        total_price: lineTotal,
+      };
+    });
 
     const sales = [newSale, ...this.getSales()];
     const allItems = [...newSaleItems, ...this.getSaleItems()];
@@ -1206,9 +1194,16 @@ export class LocalDb {
     localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(sales));
     localStorage.setItem(STORAGE_KEYS.SALE_ITEMS, JSON.stringify(allItems));
 
-    // Real-time Cloud Sync: Push sale and updated stock live to Firestore
-    CloudDb.recordSale(newSale, newSaleItems);
-    CloudDb.batchSetProducts(updatedProducts);
+    // Offline Resilience: If offline or CloudDb fails, queue in IndexedDB
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    if (!isOnline) {
+      offlineQueue.enqueue('SALE', { sale: newSale, items: newSaleItems }).catch(() => {});
+    } else {
+      CloudDb.recordSale(newSale, newSaleItems).catch(() => {
+        offlineQueue.enqueue('SALE', { sale: newSale, items: newSaleItems }).catch(() => {});
+      });
+      CloudDb.batchSetProducts(updatedProducts).catch(() => {});
+    }
 
     this.notifyListeners();
     return { success: true, sale: newSale, items: newSaleItems };
@@ -1612,17 +1607,16 @@ export class LocalDb {
   static getStoreConfig(): StoreConfig {
     const raw = localStorage.getItem(STORAGE_KEYS.STORE_CONFIG);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.STORE_CONFIG, JSON.stringify(INITIAL_STORE_CONFIG));
       return INITIAL_STORE_CONFIG;
     }
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         if (parsed.low_stock_threshold === undefined) {
-          parsed.low_stock_threshold = 10;
+          parsed.low_stock_threshold = 5;
         }
         if (!parsed.store_id) {
-          parsed.store_id = 'the_buzz_liquor';
+          parsed.store_id = 'store_main';
         }
         if (!parsed.receipt_printer_width) {
           parsed.receipt_printer_width = '80mm';
@@ -1630,7 +1624,10 @@ export class LocalDb {
         if (parsed.receipt_bold_mode === undefined) {
           parsed.receipt_bold_mode = true;
         }
-        return parsed as StoreConfig;
+        return {
+          ...INITIAL_STORE_CONFIG,
+          ...parsed,
+        };
       }
       return INITIAL_STORE_CONFIG;
     } catch {
@@ -1659,12 +1656,11 @@ export class LocalDb {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    const defaultStores = [
-      { id: 'the_buzz_liquor', name: 'The Buzz Liquor Store', branch: 'Main Branch' },
-      { id: 'the_early_kick_off_liquor', name: 'The Early Kick-Off Liquor', branch: 'Kilimani Branch' },
-    ];
-    localStorage.setItem('bazu_pos_registered_stores', JSON.stringify(defaultStores));
-    return defaultStores;
+    const cfg = this.getStoreConfig();
+    if (cfg && cfg.store_name && cfg.store_name.trim()) {
+      return [{ id: cfg.store_id || 'store_main', name: cfg.store_name, branch: cfg.branch || 'Main Branch' }];
+    }
+    return [];
   }
 
   static registerStore(id: string, name: string, branch: string): { id: string; name: string; branch: string } {
@@ -2982,6 +2978,137 @@ export class LocalDb {
     localStorage.removeItem(STORAGE_KEYS.CUSTOMER_PAYMENTS);
     localStorage.removeItem(STORAGE_KEYS.CUSTOMER_TABS);
     localStorage.removeItem(STORAGE_KEYS.REQUISITIONS);
+    localStorage.removeItem('bazu_pos_setup_completed');
     this.notifyListeners();
+  }
+
+  static isSetupCompleted(): boolean {
+    if (typeof window === 'undefined') return false;
+    const isCompleted = localStorage.getItem('bazu_pos_setup_completed') === 'true';
+    const cfg = this.getStoreConfig();
+    return isCompleted && !!cfg.store_name && cfg.store_name.trim().length > 0;
+  }
+
+  static markSetupCompleted(completed: boolean = true): void {
+    if (typeof window === 'undefined') return;
+    if (completed) {
+      localStorage.setItem('bazu_pos_setup_completed', 'true');
+    } else {
+      localStorage.removeItem('bazu_pos_setup_completed');
+    }
+    this.notifyListeners();
+  }
+
+  static purgeLegacyDemoDataIfNeeded(): boolean {
+    if (typeof window === 'undefined') return false;
+    const cleanSlateKey = 'bazu_pos_clean_slate_v4';
+    const alreadyCleaned = localStorage.getItem(cleanSlateKey) === 'true';
+
+    if (!alreadyCleaned) {
+      const rawConfig = localStorage.getItem('bazu_pos_store_config') || '';
+      const setupCompleted = localStorage.getItem('bazu_pos_setup_completed') === 'true';
+      const isLegacyBuzz = rawConfig.includes('The Buzz Liquor') || rawConfig.includes('the_buzz_liquor');
+
+      // Purge demo products, sales, customers, and store config from previous sessions
+      if (isLegacyBuzz || !setupCompleted) {
+        localStorage.removeItem('bazu_pos_products');
+        localStorage.removeItem('bazu_pos_sales');
+        localStorage.removeItem('bazu_pos_sale_items');
+        localStorage.removeItem('bazu_pos_customers');
+        localStorage.removeItem('bazu_pos_customer_payments');
+        localStorage.removeItem('bazu_pos_customer_tabs');
+        localStorage.removeItem('bazu_pos_shifts');
+        localStorage.removeItem('bazu_pos_cash_adjustments');
+        localStorage.removeItem('bazu_pos_store_config');
+        localStorage.removeItem('bazu_pos_active_store_id');
+        localStorage.removeItem('bazu_pos_registered_stores');
+        localStorage.removeItem('bazu_pos_deleted_product_ids');
+        localStorage.removeItem('bazu_pos_setup_completed');
+        sessionStorage.removeItem('bazu_pos_active_user');
+      }
+      localStorage.setItem(cleanSlateKey, 'true');
+      return true;
+    }
+    return false;
+  }
+
+  // Quick-Keys Toggle
+  static toggleProductQuickKey(productId: number): boolean {
+    const products = this.getProducts();
+    let newState = false;
+    const updated = products.map((p) => {
+      if (p.id === productId) {
+        newState = !p.is_quick_key;
+        return { ...p, is_quick_key: newState };
+      }
+      return p;
+    });
+    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updated));
+    CloudDb.batchSetProducts(updated).catch(() => {});
+    this.notifyListeners();
+    return newState;
+  }
+
+  // Draft Orders in IndexedDB
+  static async saveDraftOrder(draft: DraftOrder): Promise<void> {
+    await offlineQueue.saveDraftOrder(draft);
+    this.notifyListeners();
+  }
+
+  static async getDraftOrders(): Promise<DraftOrder[]> {
+    return await offlineQueue.getDraftOrders();
+  }
+
+  static async deleteDraftOrder(draftId: string): Promise<void> {
+    await offlineQueue.deleteDraftOrder(draftId);
+    this.notifyListeners();
+  }
+
+  // Sale Refund / Void
+  static processSaleRefund(
+    saleId: number,
+    refundReason: string,
+    managerName: string,
+    restockItems: boolean = true
+  ): { success: boolean; error?: string } {
+    const sales = this.getSales();
+    const targetSale = sales.find((s) => s.id === saleId);
+    if (!targetSale) return { success: false, error: 'Sale not found.' };
+
+    if (targetSale.status === 'REFUNDED') {
+      return { success: false, error: 'This sale has already been refunded.' };
+    }
+
+    // Mark sale refunded
+    const updatedSales = sales.map((s) =>
+      s.id === saleId
+        ? {
+            ...s,
+            status: 'REFUNDED' as const,
+            refund_reason: refundReason,
+            refunded_at: new Date().toISOString(),
+            refunded_by: managerName,
+          }
+        : s
+    );
+    localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(updatedSales));
+
+    // Optionally restock products
+    if (restockItems) {
+      const items = this.getSaleItems().filter((it) => it.sale_id === saleId);
+      const products = this.getProducts();
+      const updatedProducts = products.map((p) => {
+        const matchingItem = items.find((it) => it.product_id === p.id);
+        if (matchingItem) {
+          return { ...p, stock_qty: p.stock_qty + matchingItem.quantity };
+        }
+        return p;
+      });
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(updatedProducts));
+      CloudDb.batchSetProducts(updatedProducts).catch(() => {});
+    }
+
+    this.notifyListeners();
+    return { success: true };
   }
 }

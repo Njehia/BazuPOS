@@ -75,11 +75,11 @@ export function getActiveStoreId(): string {
   } catch {
     // fallback
   }
-  return 'the_buzz_liquor';
+  return 'store_main';
 }
 
 export function setActiveStoreId(newStoreId: string): void {
-  const clean = newStoreId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'the_buzz_liquor';
+  const clean = newStoreId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'store_main';
   localStorage.setItem('bazu_pos_active_store_id', clean);
 }
 

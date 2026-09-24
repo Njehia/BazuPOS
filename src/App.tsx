@@ -8,14 +8,17 @@ import { User } from './types';
 import { PinAuthScreen } from './components/PinAuthScreen';
 import { PosTerminal } from './components/PosTerminal';
 import { SplashScreen } from './components/SplashScreen';
+import { FirstTimeSetupModal } from './components/FirstTimeSetupModal';
 import { LocalDb } from './lib/storage';
 import { applyStoreTheme, applyThemeMode, getStoredThemeMode } from './lib/theme';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
 
+  // Check and purge legacy demo data on first boot if needed
   useEffect(() => {
     try {
+      LocalDb.purgeLegacyDemoDataIfNeeded();
       const config = LocalDb.getStoreConfig();
       applyStoreTheme(config);
       const mode = getStoredThemeMode();
@@ -24,6 +27,16 @@ export default function App() {
       // ignore
     }
   }, []);
+
+  const [isFirstTimeSetup, setIsFirstTimeSetup] = useState<boolean>(() => {
+    try {
+      LocalDb.purgeLegacyDemoDataIfNeeded();
+      return !LocalDb.isSetupCompleted();
+    } catch {
+      return false;
+    }
+  });
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = sessionStorage.getItem('bazu_pos_active_user');
     if (saved) {
@@ -46,10 +59,21 @@ export default function App() {
     sessionStorage.removeItem('bazu_pos_active_user');
   };
 
+  const handleSetupComplete = (configuredUser: User) => {
+    setIsFirstTimeSetup(false);
+    handleAuthenticated(configuredUser);
+  };
+
   return (
     <div className="w-full h-full min-h-screen bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-white transition-colors duration-200">
       {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
-      {!currentUser ? (
+      {isFirstTimeSetup ? (
+        <FirstTimeSetupModal
+          isOpen={true}
+          canClose={false}
+          onComplete={handleSetupComplete}
+        />
+      ) : !currentUser ? (
         <PinAuthScreen onAuthenticated={handleAuthenticated} />
       ) : (
         <PosTerminal currentUser={currentUser} onLogout={handleLogout} />
@@ -57,4 +81,3 @@ export default function App() {
     </div>
   );
 }
-

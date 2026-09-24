@@ -86,6 +86,12 @@ export interface Category {
 
 export type ProductCategory = string;
 
+export interface ProductVariant {
+  id: string;
+  name: string; // e.g. "Double Tot (60ml)", "Full Bottle (750ml)", "Cold", "With Mixer"
+  price: number;
+}
+
 export interface Product {
   id: number;
   barcode: string;
@@ -95,6 +101,8 @@ export interface Product {
   stock_qty: number;
   unit: string;
   low_stock_threshold?: number; // Optional per-item defined alert threshold (defaults to store setting)
+  is_quick_key?: boolean; // Starred for instant 1-tap cashier access
+  variants?: ProductVariant[]; // Optional variations e.g. sizes/tots
 }
 
 export type PaymentMethod = 'CASH' | 'MPESA' | 'DEBT' | 'SPLIT';
@@ -138,7 +146,15 @@ export interface Sale {
   id: number;
   cashier_name: string;
   total_amount: number;
+  subtotal_amount?: number;
+  discount_amount?: number;
+  discount_percent?: number;
+  discount_reason?: string;
+  discount_authorized_by?: string;
   payment_method: PaymentMethod;
+  split_cash_amount?: number;
+  split_mpesa_amount?: number;
+  split_other_amount?: number;
   created_at: string; // ISO string
   mpesa_code?: string;
   cash_tendered?: number;
@@ -151,6 +167,11 @@ export interface Sale {
   amount_paid?: number; // Actual KES paid at time of sale
   debt_amount?: number; // Outstanding unpaid balance from this sale
   payment_status?: SalePaymentStatus;
+  is_offline_sync?: boolean;
+  status?: 'COMPLETED' | 'REFUNDED' | 'VOIDED';
+  refund_reason?: string;
+  refunded_at?: string;
+  refunded_by?: string;
 }
 
 export interface SaleItem {
@@ -161,6 +182,9 @@ export interface SaleItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  variant_name?: string;
+  notes?: string;
+  is_voided?: boolean;
 }
 
 export interface StoreConfig {
@@ -184,6 +208,21 @@ export interface StoreConfig {
 export interface CartItem {
   product: Product;
   quantity: number;
+  selectedVariant?: ProductVariant;
+  notes?: string;
+  discountPercent?: number;
+}
+
+export interface DraftOrder {
+  id: string;
+  name?: string;
+  cart: CartItem[];
+  customer_id?: number;
+  customer_name?: string;
+  saved_at: string;
+  cashier_name: string;
+  total_amount: number;
+  total_items: number;
 }
 
 export type RequisitionStatus =

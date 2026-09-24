@@ -90,43 +90,79 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
   const existingProducts = useMemo(() => LocalDb.getProducts(), []);
   const existingCategories = useMemo(() => LocalDb.getCategories(), []);
 
+  const STOP_WORDS = useMemo(
+    () =>
+      new Set([
+        'bottle', 'bottles', 'can', 'cans', 'crate', 'crates', 'pack', 'packs', 'box', 'boxes',
+        'beer', 'lager', 'spirit', 'spirits', 'liquor', 'drink', 'drinks', 'case', 'cases',
+        'carton', 'cartons', '500ml', '750ml', '330ml', '350ml', '1000ml', '1l', '250ml',
+        'kes', 'shs', 'pcs', 'unit', 'units', 'the', 'and', 'with', 'for'
+      ]),
+    []
+  );
+
   // Helper to match extracted text against current inventory
   const matchWithInventory = (rawName: string, barcode?: string): { product?: Product; confidence: 'HIGH' | 'MEDIUM' | 'LOW' } => {
     const cleanRaw = rawName.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
 
     // 1. Exact barcode match
     if (barcode && barcode.trim()) {
-      const matchBarcode = existingProducts.find((p) => p.barcode === barcode.trim());
+      const b = barcode.trim();
+      const matchBarcode = existingProducts.find((p) => p.barcode && p.barcode.trim() === b);
       if (matchBarcode) return { product: matchBarcode, confidence: 'HIGH' };
     }
 
     // 2. Exact or very close name match
     const exact = existingProducts.find(
-      (p) => p.name.toLowerCase().trim() === cleanRaw || p.name.toLowerCase().trim() === rawName.toLowerCase().trim()
+      (p) => {
+        const pClean = p.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+        return pClean === cleanRaw || p.name.toLowerCase().trim() === rawName.toLowerCase().trim();
+      }
     );
     if (exact) return { product: exact, confidence: 'HIGH' };
 
-    // 3. Keyword / Substring match (e.g., "Tusker Lager 500ml" matches "Tusker Lager")
-    const words = cleanRaw.split(/\s+/).filter((w) => w.length > 2);
+    // 3. Keyword / Substring match on distinctive brand words (excluding stop words like 500ml, beer, can)
+    const rawBrandWords = cleanRaw
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+
+    if (rawBrandWords.length === 0) {
+      return { product: undefined, confidence: 'LOW' };
+    }
+
     let bestMatch: Product | null = null;
     let highestScore = 0;
 
     for (const p of existingProducts) {
-      const pClean = p.name.toLowerCase();
-      let score = 0;
-      for (const w of words) {
-        if (pClean.includes(w)) {
-          score += 1;
+      const pClean = p.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+      const pBrandWords = pClean
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+
+      if (pBrandWords.length === 0) continue;
+
+      // Check if all brand words of existing product appear in raw receipt name
+      const allProductWordsInRaw = pBrandWords.every((w) => cleanRaw.includes(w));
+      if (allProductWordsInRaw) {
+        return { product: p, confidence: 'HIGH' };
+      }
+
+      let matchCount = 0;
+      for (const w of rawBrandWords) {
+        if (pBrandWords.includes(w)) {
+          matchCount += 1;
         }
       }
-      if (score > highestScore && score >= 2) {
-        highestScore = score;
+
+      const minRequired = pBrandWords.length === 1 ? 1 : 2;
+      if (matchCount >= minRequired && matchCount > highestScore) {
+        highestScore = matchCount;
         bestMatch = p;
       }
     }
 
     if (bestMatch) {
-      return { product: bestMatch, confidence: highestScore >= 3 ? 'HIGH' : 'MEDIUM' };
+      return { product: bestMatch, confidence: highestScore >= 2 ? 'HIGH' : 'MEDIUM' };
     }
 
     return { product: undefined, confidence: 'LOW' };
@@ -142,14 +178,16 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
     });
   };
 
-  // Compress & optimize image files using HTML5 Canvas to prevent upload timeouts and proxy 413s
+  // Compress & optimize image files using HTML5 Canvas to prevent upload timeouts
   const compressAndOptimizeImage = async (
     file: File,
-    maxDimension = 1280,
-    quality = 0.78
+    maxDimension = 2048,
+    quality = 0.85
   ): Promise<{ base64: string; mimeType: string }> => {
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name);
+
     // If not an image (e.g. PDF), read base64 directly
-    if (!file.type.startsWith('image/')) {
+    if (!isImage) {
       const b64 = await fileToBase64(file);
       return { base64: b64, mimeType: file.type || 'application/pdf' };
     }
@@ -282,155 +320,32 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
     }
   };
 
-  // Pure client-side PDF text parser and distributor stock matcher for local/desktop execution
-  const parsePdfLocally = async (file: File): Promise<ParsedStockItem[]> => {
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let rawText = '';
-      const len = Math.min(bytes.length, 3 * 1024 * 1024); // read up to 3MB
-      for (let i = 0; i < len; i++) {
-        const b = bytes[i];
-        if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
-          rawText += String.fromCharCode(b);
-        } else {
-          rawText += ' ';
-        }
-      }
-
-      // Extract PDF string objects inside parentheses: (Text) Tj or [(Text)-10(More)] TJ
-      const strings: string[] = [];
-      const tjRegex = /\(([^)]{2,})\)/g;
-      let match: RegExpExecArray | null;
-      while ((match = tjRegex.exec(rawText)) !== null) {
-        const s = match[1]
-          .replace(/\\([0-9]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
-          .replace(/\\[rntbf]/g, ' ')
-          .replace(/\\(.)/g, '$1')
-          .trim();
-        if (s.length >= 2) {
-          strings.push(s);
-        }
-      }
-
-      const combinedText = (strings.length > 3 ? strings.join(' ') : rawText).toLowerCase();
-
-      const detected: ParsedStockItem[] = [];
-      const seenProductIds = new Set<string>();
-
-      for (const prod of existingProducts) {
-        const pNameLower = prod.name.toLowerCase();
-        // Tokenize product name (e.g. "tusker", "lager")
-        const tokens = pNameLower.split(/\s+/).filter((t) => t.length > 2 && !/^(500ml|330ml|750ml|1l|can|bottle)$/.test(t));
-
-        const isMatch =
-          tokens.length >= 2
-            ? tokens.every((t) => combinedText.includes(t))
-            : tokens.length === 1
-            ? combinedText.includes(tokens[0])
-            : combinedText.includes(pNameLower);
-
-        if (isMatch && !seenProductIds.has(prod.id)) {
-          seenProductIds.add(prod.id);
-
-          // Scan nearby text for realistic quantity (e.g. 24, 12, 6, 48)
-          let qty = prod.category === 'beer' ? 24 : prod.category === 'spirits' || prod.category === 'whisky' || prod.category === 'gin' ? 6 : 1;
-
-          const anchor = tokens[0] || pNameLower;
-          const anchorIdx = combinedText.indexOf(anchor);
-          if (anchorIdx !== -1) {
-            const windowText = combinedText.slice(Math.max(0, anchorIdx - 40), Math.min(combinedText.length, anchorIdx + 80));
-            const numMatches = windowText.match(/\b([1-9][0-9]?)\b/g);
-            if (numMatches) {
-              for (const n of numMatches) {
-                const parsed = parseInt(n, 10);
-                if (parsed >= 1 && parsed <= 120 && parsed !== 180 && parsed !== 190 && parsed !== 220) {
-                  qty = parsed;
-                  break;
-                }
-              }
-            }
-          }
-
-          detected.push({
-            id: `pdf-${prod.id}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-            name: prod.name,
-            category: prod.category,
-            quantity: qty,
-            unit: prod.unit || 'Bottle',
-            cost_price: undefined,
-            selling_price: prod.price,
-            barcode: prod.barcode,
-            matched_product_id: prod.id,
-            matched_product_name: prod.name,
-            current_stock: prod.stock_qty,
-            new_stock_after: prod.stock_qty + qty,
-            is_new_product: false,
-            status: 'CONFIRMED',
-            confidence: 'HIGH',
-          });
-        }
-      }
-
-      return detected;
-    } catch (e) {
-      console.warn('Local PDF extraction exception:', e);
-      return [];
-    }
-  };
-
-  // Handle Photo or PDF file parsing via Gemini Multimodal API with Offline/Desktop Resilient Fallback
+  // Handle Photo or PDF file parsing via Gemini Multimodal API
   const processImageOrPdfFile = async (file: File, type: 'PICTURE' | 'PDF') => {
     setIsProcessing(true);
     setProcessingStatus(
       type === 'PICTURE'
-        ? 'Optimizing receipt image for quick upload...'
+        ? 'Optimizing receipt image...'
         : 'Reading PDF delivery invoice...'
     );
     setErrorMessage(null);
 
-    // Fast-track PDF local extraction if available
-    if (type === 'PDF') {
-      try {
-        const fastPdfItems = await parsePdfLocally(file);
-        if (fastPdfItems.length > 0) {
-          setSourceFileName(file.name);
-          setSourceType('PDF');
-          setParsedItems(fastPdfItems);
-          setErrorMessage(null);
-          setStep('REVIEW');
-          setIsProcessing(false);
-          return;
-        }
-      } catch (e) {
-        console.warn('Fast PDF parse failed, trying cloud parser:', e);
-      }
-    }
-
     try {
-      // Compress camera photos to prevent upload timeouts & proxy payload limits
+      // Compress camera photos to prevent upload timeouts
       const { base64, mimeType } = await compressAndOptimizeImage(file);
 
       setProcessingStatus(
         type === 'PICTURE'
-          ? 'Scanning receipt text & detecting drinks with Gemini AI...'
-          : 'Analyzing PDF line items with Gemini AI...'
+          ? 'Scanning receipt text & detecting stock with Gemini AI...'
+          : 'Extracting PDF invoice items with Gemini AI...'
       );
 
-      let response: Response | null = null;
-      let networkFailed = false;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
+      let response: Response;
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
-
-        const baseOrigin =
-          typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http')
-            ? window.location.origin
-            : '';
-        const endpoint = baseOrigin ? `${baseOrigin}/api/parse-stock` : '/api/parse-stock';
-
-        response = await fetch(endpoint, {
+        response = await fetch('/api/parse-stock', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -441,96 +356,38 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
             fileType: type,
           }),
         });
+      } finally {
         clearTimeout(timeoutId);
-      } catch (fetchErr: any) {
-        networkFailed = true;
       }
 
-      // If network fetch failed (e.g. running in packaged Electron desktop app or offline)
-      if (networkFailed || !response) {
-        if (type === 'PDF') {
-          const fallbackPdfItems = await parsePdfLocally(file);
-          if (fallbackPdfItems.length > 0) {
-            setSourceFileName(file.name);
-            setSourceType('PDF');
-            setParsedItems(fallbackPdfItems);
-            setErrorMessage(null);
-            setStep('REVIEW');
-            return;
-          }
+      if (!response.ok) {
+        let errDetail = '';
+        try {
+          const errJson = await response.json();
+          errDetail = errJson?.error || '';
+        } catch {
+          // ignore
         }
-
-        // For photos or unparsed PDFs on desktop/offline, seamlessly transition to Review
-        // with the user's uploaded receipt and standard starter items so cashier can verify
-        setSourceFileName(file.name);
-        setSourceType(type);
-
-        const defaultProd = existingProducts[0];
-        const initialItem: ParsedStockItem = defaultProd
-          ? {
-              id: `item-${Date.now()}-1`,
-              name: defaultProd.name,
-              category: defaultProd.category,
-              quantity: defaultProd.category === 'beer' ? 24 : 6,
-              unit: defaultProd.unit || 'Bottle',
-              cost_price: undefined,
-              selling_price: defaultProd.price,
-              barcode: defaultProd.barcode,
-              matched_product_id: defaultProd.id,
-              matched_product_name: defaultProd.name,
-              current_stock: defaultProd.stock_qty,
-              new_stock_after: defaultProd.stock_qty + (defaultProd.category === 'beer' ? 24 : 6),
-              is_new_product: false,
-              status: 'CONFIRMED',
-              confidence: 'MEDIUM',
-            }
-          : {
-              id: `item-${Date.now()}-1`,
-              name: 'Tusker Lager 500ml',
-              category: 'beer',
-              quantity: 24,
-              unit: 'Bottle',
-              cost_price: 180,
-              selling_price: 220,
-              current_stock: 0,
-              new_stock_after: 24,
-              is_new_product: false,
-              status: 'CONFIRMED',
-              confidence: 'MEDIUM',
-            };
-
-        setParsedItems([initialItem]);
-        setErrorMessage(null);
-        setStep('REVIEW');
-        return;
+        throw new Error(errDetail || `Stock extraction server responded with error ${response.status}.`);
       }
 
-      let resData: any = null;
-      try {
-        const text = await response.text();
-        resData = JSON.parse(text);
-      } catch (parseErr) {
-        throw new Error(
-          `Server returned status ${response.status}. The uploaded image might be too large or the server encountered an error. Try Quick Manual Entry below.`
-        );
-      }
-
-      if (!response.ok || !resData?.success) {
-        throw new Error(resData?.error || `Stock extraction failed (HTTP ${response.status}).`);
+      const resData = await response.json();
+      if (!resData?.success) {
+        throw new Error(resData?.error || 'Document extraction failed.');
       }
 
       const extractedItemsRaw = resData.data?.items || [];
       if (!Array.isArray(extractedItemsRaw) || extractedItemsRaw.length === 0) {
         const note = resData.data?.notes ? ` (${resData.data.notes})` : '';
         throw new Error(
-          `No recognizable drinks or stock items found in the document${note}. Please ensure the receipt is clear, or use Quick Manual Entry.`
+          `No recognizable items could be extracted from this document${note}. Please ensure the receipt is clear and readable, or use Quick Manual Entry.`
         );
       }
 
       setProcessingStatus('Matching extracted items with local store inventory...');
 
       const matchedResults: ParsedStockItem[] = extractedItemsRaw.map((raw: any, idx: number) => {
-        const rawName = String(raw.name || 'Unnamed Drink').trim();
+        const rawName = String(raw.name || 'Unnamed Product').trim();
         const rawQty = Math.max(1, Math.round(Number(raw.quantity) || 1));
         const rawCost = typeof raw.cost_price === 'number' && raw.cost_price > 0 ? raw.cost_price : undefined;
         const rawSell = typeof raw.selling_price === 'number' && raw.selling_price > 0 ? raw.selling_price : undefined;
@@ -539,15 +396,15 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
 
         return {
           id: `parsed-${idx}-${Date.now()}`,
-          name: match.product ? match.product.name : rawName,
-          category: match.product ? match.product.category : raw.category || 'beer',
+          name: rawName,
+          category: match.product ? match.product.category : (raw.category ? String(raw.category).toLowerCase() : 'beer'),
           quantity: rawQty,
           unit: raw.unit || (match.product ? match.product.unit : 'Bottle'),
           cost_price: rawCost,
-          selling_price: rawSell || match.product?.price,
-          barcode: raw.barcode || match.product?.barcode,
-          matched_product_id: match.product?.id,
-          matched_product_name: match.product?.name,
+          selling_price: rawSell || match.product?.price || (rawCost ? Math.round(rawCost * 1.25) : 250),
+          barcode: raw.barcode || match.product?.barcode || '',
+          matched_product_id: match.product ? match.product.id : undefined,
+          matched_product_name: match.product ? match.product.name : undefined,
           current_stock: match.product ? match.product.stock_qty : 0,
           new_stock_after: match.product ? match.product.stock_qty + rawQty : rawQty,
           is_new_product: !match.product,
@@ -562,9 +419,13 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
       setStep('REVIEW');
     } catch (err: any) {
       console.error('Receipt parse error:', err);
-      setErrorMessage(
-        err.message || 'Error processing document. Ensure the image is clear or use Quick Manual Entry.'
-      );
+      if (err.name === 'AbortError') {
+        setErrorMessage('Document processing timed out. Please check your connection or try a smaller image.');
+      } else {
+        setErrorMessage(
+          err.message || 'Error processing document. Ensure the image is clear or use Quick Manual Entry.'
+        );
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -674,7 +535,7 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
       return;
     }
 
-    const prod = existingProducts.find((p) => p.id === productId);
+    const prod = existingProducts.find((p) => String(p.id) === String(productId));
     if (!prod) return;
 
     setParsedItems((prev) =>
@@ -706,7 +567,7 @@ export const SmartStockUploadModal: React.FC<SmartStockUploadModalProps> = ({
         if (match.product) {
           return {
             ...i,
-            name: match.product.name,
+            name: newName,
             category: match.product.category,
             matched_product_id: match.product.id,
             matched_product_name: match.product.name,
