@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db, getActiveTenantId, handleFirestoreError, OperationType } from '../lib/firebase';
 import { CartItem } from '../types';
+import { LocalDb } from '../lib/storage';
 
 export interface TenantProduct {
   id: string;
@@ -139,12 +140,59 @@ export function usePOS(customTenantId?: string) {
           return a.name.localeCompare(b.name);
         });
 
+        if (list.length === 0) {
+          try {
+            const localProds = LocalDb.getProducts();
+            if (localProds && localProds.length > 0) {
+              const fallbackList: TenantProduct[] = localProds.map((lp) => ({
+                id: String(lp.id),
+                name: lp.name,
+                category: lp.category,
+                price: lp.price,
+                costPrice: Math.round(lp.price * 0.75),
+                stockQuantity: lp.stock_qty,
+                barcode: lp.barcode,
+                quickKey: !!lp.is_quick_key,
+                unit: lp.unit || 'pcs',
+                lowStockThreshold: lp.low_stock_threshold || 10,
+              }));
+              setProducts(fallbackList);
+              setIsLoading(false);
+              setError(null);
+              return;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         setProducts(list);
         setIsLoading(false);
         setError(null);
       },
       (err) => {
         console.warn('Real-time products snapshot warning:', err);
+        try {
+          const localProds = LocalDb.getProducts();
+          if (localProds && localProds.length > 0) {
+            setProducts(
+              localProds.map((lp) => ({
+                id: String(lp.id),
+                name: lp.name,
+                category: lp.category,
+                price: lp.price,
+                costPrice: Math.round(lp.price * 0.75),
+                stockQuantity: lp.stock_qty,
+                barcode: lp.barcode,
+                quickKey: !!lp.is_quick_key,
+                unit: lp.unit || 'pcs',
+                lowStockThreshold: lp.low_stock_threshold || 10,
+              }))
+            );
+          }
+        } catch {
+          // ignore
+        }
         setError('Working offline or sync paused.');
         setIsLoading(false);
       }

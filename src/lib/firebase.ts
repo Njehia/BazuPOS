@@ -57,9 +57,17 @@ try {
     },
     databaseId
   );
-} catch {
-  // If already initialized in this runtime
-  firestoreInstance = getFirestore(app, databaseId);
+} catch (e1) {
+  try {
+    firestoreInstance = getFirestore(app, databaseId);
+  } catch (e2) {
+    try {
+      firestoreInstance = getFirestore(app);
+    } catch (e3) {
+      console.warn('Fallback default firestore instance:', e3);
+      firestoreInstance = getFirestore();
+    }
+  }
 }
 
 export const db = firestoreInstance;

@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -7,8 +8,12 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Safe resolution of directory for both tsx dev (ESM) and esbuild production (CJS bundle)
+const currentDirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : (typeof import.meta !== 'undefined' && import.meta.url
+      ? path.dirname(fileURLToPath(import.meta.url))
+      : process.cwd());
 
 async function startServer() {
   const app = express();
@@ -175,10 +180,27 @@ CRITICAL EXTRACTION RULES:
     }
   });
 
-  // Vite middleware for dev or static serving for production
-  if (process.env.NODE_ENV !== 'production') {
+  // Detect if running from production bundle in dist or if production dist exists
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    currentDirname.endsWith('dist') ||
+    currentDirname.includes('/dist');
+
+  const distPath = currentDirname.endsWith('dist')
+    ? currentDirname
+    : path.join(process.cwd(), 'dist');
+
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+
+  if (isProduction && hasDist) {
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  } else {
+    const viteConfigPath = path.resolve(process.cwd(), 'vite.config.ts');
     const vite = await createViteServer({
-      configFile: path.resolve(__dirname, 'vite.config.ts'),
+      configFile: fs.existsSync(viteConfigPath) ? viteConfigPath : false,
       server: {
         middlewareMode: true,
         hmr: false,
@@ -187,12 +209,6 @@ CRITICAL EXTRACTION RULES:
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { BazuLogo } from './BazuLogo';
 
 interface SplashScreenProps {
@@ -19,35 +19,43 @@ interface SplashScreenProps {
  */
 export const SplashScreen: React.FC<SplashScreenProps> = ({
   onFinish,
-  minDurationMs = 1800,
+  minDurationMs = 1500,
 }) => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [animationPhase, setAnimationPhase] = useState<'enter' | 'active' | 'exit'>('enter');
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
 
   useEffect(() => {
-    // 1. Trigger entrance spring animation on initial render
+    let unmountTimer: any = null;
+
+    // 1. Trigger entrance spring animation
     const enterTimer = setTimeout(() => {
       setAnimationPhase('active');
     }, 40);
 
-    // 2. Run active initialization state, then trigger smooth exit
+    // 2. Trigger smooth exit transition
     const activeTimer = setTimeout(() => {
       setIsInitializing(false);
       setAnimationPhase('exit');
 
-      // 3. Complete fade-out and unmount
-      const unmountTimer = setTimeout(() => {
-        onFinish();
-      }, 400);
-
-      return () => clearTimeout(unmountTimer);
+      unmountTimer = setTimeout(() => {
+        onFinishRef.current();
+      }, 350);
     }, minDurationMs);
+
+    // 3. Absolute safety fallback: guarantee unmount after minDurationMs + 800ms
+    const safetyTimer = setTimeout(() => {
+      onFinishRef.current();
+    }, minDurationMs + 800);
 
     return () => {
       clearTimeout(enterTimer);
       clearTimeout(activeTimer);
+      if (unmountTimer) clearTimeout(unmountTimer);
+      clearTimeout(safetyTimer);
     };
-  }, [onFinish, minDurationMs]);
+  }, [minDurationMs]);
 
   // Compute transform & opacity styles based on current animation phase
   const getContainerStyles = (): React.CSSProperties => {
@@ -56,21 +64,29 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
         return {
           opacity: 0,
           transform: 'scale(0.82) translateY(12px)',
-          transition: 'all 500ms cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'all 400ms cubic-bezier(0.16, 1, 0.3, 1)',
         };
       case 'active':
         return {
           opacity: 1,
           transform: 'scale(1) translateY(0px)',
-          transition: 'all 500ms cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'all 400ms cubic-bezier(0.16, 1, 0.3, 1)',
         };
       case 'exit':
         return {
           opacity: 0,
           transform: 'scale(1.05) translateY(-6px)',
-          transition: 'all 400ms cubic-bezier(0.4, 0, 0.2, 1)',
+          transition: 'all 350ms cubic-bezier(0.4, 0, 0.2, 1)',
         };
     }
+  };
+
+  const handleDismissImmediate = () => {
+    setIsInitializing(false);
+    setAnimationPhase('exit');
+    setTimeout(() => {
+      onFinishRef.current();
+    }, 150);
   };
 
   return (
@@ -83,7 +99,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
       {/* Floating Centered Glassmorphic Card (Max 340px on mobile, Max 400px on desktop) */}
       <div
         style={getContainerStyles()}
-        className="w-full max-w-[340px] sm:max-w-[400px] bg-slate-900/80 dark:bg-slate-950/85 backdrop-blur-xl border border-white/15 dark:border-amber-500/20 rounded-3xl p-6 sm:p-7 shadow-[0_20px_50px_rgba(0,0,0,0.5),0_0_30px_rgba(245,158,11,0.12)] text-white relative overflow-hidden pointer-events-auto flex flex-col items-center text-center"
+        onClick={handleDismissImmediate}
+        className="w-full max-w-[340px] sm:max-w-[400px] bg-slate-900/85 dark:bg-slate-950/90 backdrop-blur-xl border border-white/15 dark:border-amber-500/20 rounded-3xl p-6 sm:p-7 shadow-[0_20px_50px_rgba(0,0,0,0.5),0_0_30px_rgba(245,158,11,0.12)] text-white relative overflow-hidden pointer-events-auto flex flex-col items-center text-center cursor-pointer"
+        title="Click to enter immediately"
       >
         {/* Dynamic Vibrant Ambient Backlight Glow behind Logo */}
         <div
@@ -140,7 +158,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
         <div className="w-full mt-5 relative z-10">
           <div className="h-1.5 w-full bg-slate-800/80 rounded-full overflow-hidden border border-white/5">
             <div
-              className={`h-full bg-gradient-to-r from-amber-500 via-amber-300 to-emerald-400 rounded-full transition-all duration-1000 ease-out ${
+              className={`h-full bg-gradient-to-r from-amber-500 via-amber-300 to-emerald-400 rounded-full transition-all duration-700 ease-out ${
                 animationPhase === 'enter'
                   ? 'w-1/4'
                   : animationPhase === 'active'

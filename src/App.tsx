@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { User } from './types';
 import { PinAuthScreen } from './components/PinAuthScreen';
 import { PosTerminal } from './components/PosTerminal';
@@ -63,6 +63,10 @@ export default function App() {
     };
   });
 
+  const handleFinishSplash = useCallback(() => {
+    setShowSplash(false);
+  }, []);
+
   const handleAuthenticated = (user: User) => {
     setCurrentUser(user);
     sessionStorage.setItem('bazu_pos_active_user', JSON.stringify(user));
@@ -88,7 +92,7 @@ export default function App() {
   return (
     <div className="w-full h-full min-h-screen bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-white transition-colors duration-200 relative">
       {/* Startup Logo Animation */}
-      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+      {showSplash && <SplashScreen onFinish={handleFinishSplash} />}
 
       {/* Global Quick SaaS Navigation Bar */}
       <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/90 dark:bg-slate-950/90 backdrop-blur-md border border-slate-700/60 rounded-full px-3 py-1.5 shadow-2xl flex items-center gap-1.5 text-xs text-slate-300">
@@ -143,7 +147,8 @@ export default function App() {
       {isFirstTimeSetup ? (
         <FirstTimeSetupModal
           isOpen={true}
-          canClose={false}
+          canClose={true}
+          onClose={() => setIsFirstTimeSetup(false)}
           onComplete={handleSetupComplete}
         />
       ) : !currentUser ? (
