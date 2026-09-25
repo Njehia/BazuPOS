@@ -14,8 +14,11 @@ import {
   query,
   where,
   writeBatch,
+  deleteDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { auth, db, setActiveTenantId, getActiveTenantId, handleFirestoreError, OperationType } from '../lib/firebase';
+import { INITIAL_PRODUCTS, INITIAL_CATEGORIES } from '../data/seedData';
 
 export interface TenantMetadata {
   id: string;
@@ -36,29 +39,13 @@ export interface TenantUser {
   createdAt: string;
 }
 
-export interface StarterProductSeed {
+export interface TenantCategory {
+  id: string;
   name: string;
-  category: string;
-  price: number;
-  costPrice: number;
-  stockQuantity: number;
-  barcode: string;
-  quickKey: boolean;
+  icon?: string;
+  description?: string;
+  createdAt?: string;
 }
-
-const DEFAULT_STARTER_PRODUCTS: StarterProductSeed[] = [
-  { name: 'Tusker Lager 500ml', category: 'Beer', price: 250, costPrice: 190, stockQuantity: 72, barcode: '6161100010101', quickKey: true },
-  { name: 'Guinness Foreign Extra 500ml', category: 'Beer', price: 280, costPrice: 215, stockQuantity: 48, barcode: '6161100010102', quickKey: true },
-  { name: 'White Cap Crisp 500ml', category: 'Beer', price: 260, costPrice: 200, stockQuantity: 36, barcode: '6161100010103', quickKey: true },
-  { name: 'Johnnie Walker Black Label 750ml', category: 'Spirits', price: 3800, costPrice: 3100, stockQuantity: 18, barcode: '5000267024203', quickKey: true },
-  { name: 'Jameson Irish Whiskey 750ml', category: 'Spirits', price: 2600, costPrice: 2150, stockQuantity: 24, barcode: '5011007003004', quickKey: true },
-  { name: 'Gilbeys Special Dry Gin 750ml', category: 'Spirits', price: 1450, costPrice: 1180, stockQuantity: 30, barcode: '6161100020201', quickKey: true },
-  { name: 'Smirnoff Red Vodka 750ml', category: 'Spirits', price: 1550, costPrice: 1250, stockQuantity: 20, barcode: '5000281001013', quickKey: true },
-  { name: 'Nederburg Cabernet Sauvignon 750ml', category: 'Wine', price: 1750, costPrice: 1350, stockQuantity: 15, barcode: '6001497400018', quickKey: false },
-  { name: 'Coca-Cola 500ml PET', category: 'Soft Drinks', price: 80, costPrice: 55, stockQuantity: 60, barcode: '5449000000996', quickKey: true },
-  { name: 'Keringet Still Mineral Water 500ml', category: 'Water', price: 70, costPrice: 40, stockQuantity: 50, barcode: '6161100030302', quickKey: true },
-  { name: 'Schweppes Tonic Water 330ml Can', category: 'Mixers', price: 100, costPrice: 70, stockQuantity: 40, barcode: '5449000020109', quickKey: true },
-];
 
 export class AuthService {
   /**
@@ -104,18 +91,8 @@ export class AuthService {
       };
       await setDoc(userDocRef, tenantUserData);
 
-      // 5. Seed starter inventory products for the new tenant
-      const batch = writeBatch(db);
-      DEFAULT_STARTER_PRODUCTS.forEach((prod, index) => {
-        const prodId = `prod_${Date.now()}_${index + 1}`;
-        const prodRef = doc(db, 'tenants', tenantId, 'products', prodId);
-        batch.set(prodRef, {
-          ...prod,
-          id: prodId,
-          createdAt: new Date().toISOString(),
-        });
-      });
-      await batch.commit();
+      // 5. Seed full catalog of categories & products for the new tenant
+      await this.seedTenantCatalog(tenantId);
 
       // 6. Save active tenant in storage
       setActiveTenantId(tenantId);
@@ -125,6 +102,51 @@ export class AuthService {
       return { user, tenantId };
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'tenants');
+    }
+  }
+
+  /**
+   * Seed complete catalog of categories and products to tenant
+   */
+  static async seedTenantCatalog(tenantId: string): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+
+      // Seed categories
+      for (const cat of INITIAL_CATEGORIES) {
+        const catRef = doc(db, 'tenants', tenantId, 'categories', cat.id);
+        batch.set(catRef, {
+          id: cat.id,
+          name: cat.name,
+          icon: cat.icon || '🏷️',
+          description: cat.description || '',
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      // Seed extensive products list
+      for (const prod of INITIAL_PRODUCTS) {
+        const prodId = `prod_${prod.id}`;
+        const prodRef = doc(db, 'tenants', tenantId, 'products', prodId);
+        batch.set(prodRef, {
+          id: prodId,
+          name: prod.name,
+          category: prod.category,
+          price: prod.price,
+          costPrice: Math.round(prod.price * 0.75),
+          stockQuantity: prod.stock_qty,
+          barcode: prod.barcode,
+          quickKey: !!prod.is_quick_key,
+          unit: prod.unit || 'pcs',
+          lowStockThreshold: prod.low_stock_threshold || 10,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      await batch.commit();
+    } catch (err) {
+      console.warn('Error seeding tenant catalog:', err);
     }
   }
 
@@ -232,6 +254,66 @@ export class AuthService {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users`);
+    }
+  }
+
+  /**
+   * Fetch categories for a tenant
+   */
+  static async getTenantCategories(tenantId?: string): Promise<TenantCategory[]> {
+    const tid = tenantId || getActiveTenantId();
+    try {
+      const catsCol = collection(db, 'tenants', tid, 'categories');
+      const snap = await getDocs(catsCol);
+      const list: TenantCategory[] = [];
+      snap.forEach((d) => {
+        list.push({ ...d.data(), id: d.id } as TenantCategory);
+      });
+      if (list.length > 0) return list;
+    } catch {
+      // ignore
+    }
+    return INITIAL_CATEGORIES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      icon: c.icon,
+      description: c.description,
+    }));
+  }
+
+  /**
+   * Add a new category for a tenant
+   */
+  static async addTenantCategory(
+    tenantId: string,
+    category: { name: string; icon?: string; description?: string }
+  ): Promise<TenantCategory> {
+    const cleanId = category.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `cat_${Date.now()}`;
+    const newCat: TenantCategory = {
+      id: cleanId,
+      name: category.name.trim(),
+      icon: category.icon?.trim() || '🏷️',
+      description: category.description?.trim() || '',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const catRef = doc(db, 'tenants', tenantId, 'categories', cleanId);
+      await setDoc(catRef, newCat);
+      return newCat;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/categories/${cleanId}`);
+    }
+  }
+
+  /**
+   * Delete category from tenant
+   */
+  static async deleteTenantCategory(tenantId: string, categoryId: string): Promise<void> {
+    try {
+      const catRef = doc(db, 'tenants', tenantId, 'categories', categoryId);
+      await deleteDoc(catRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `tenants/${tenantId}/categories/${categoryId}`);
     }
   }
 }

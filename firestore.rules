@@ -53,6 +53,12 @@ service cloud.firestore {
         );
       }
 
+      // Subcollection: categories/{categoryId}
+      match /categories/{categoryId} {
+        allow read: if isTenantUser(tenantId);
+        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
+      }
+
       // Subcollection: products/{productId}
       match /products/{productId} {
         allow read: if isTenantUser(tenantId);

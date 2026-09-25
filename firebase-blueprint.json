@@ -25,6 +25,18 @@
       },
       "required": ["email", "role", "name", "pinHash"]
     },
+    "tenant_categories": {
+      "title": "TenantCategory",
+      "description": "Product category for organizing retail inventory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Category name" },
+        "icon": { "type": "string", "description": "Category emoji or icon" },
+        "description": { "type": "string", "description": "Description of items in this category" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" }
+      },
+      "required": ["name"]
+    },
     "tenant_products": {
       "title": "TenantProduct",
       "description": "Catalog product for this specific merchant tenant",
@@ -77,6 +89,10 @@
     "/tenants/{tenantId}/users/{userId}": {
       "schema": "tenant_users",
       "description": "Tenant staff accounts and permissions"
+    },
+    "/tenants/{tenantId}/categories/{categoryId}": {
+      "schema": "tenant_categories",
+      "description": "Tenant isolated product categories"
     },
     "/tenants/{tenantId}/products/{productId}": {
       "schema": "tenant_products",

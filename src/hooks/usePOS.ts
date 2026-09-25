@@ -15,6 +15,8 @@ import {
 import { db, getActiveTenantId, handleFirestoreError, OperationType } from '../lib/firebase';
 import { CartItem } from '../types';
 import { LocalDb } from '../lib/storage';
+import { INITIAL_PRODUCTS, INITIAL_CATEGORIES } from '../data/seedData';
+import { AuthService, TenantCategory } from '../services/auth';
 
 export interface TenantProduct {
   id: string;
@@ -87,6 +89,7 @@ export function usePOS(customTenantId?: string) {
   const tenantId = useMemo(() => customTenantId || getActiveTenantId(), [customTenantId]);
 
   const [products, setProducts] = useState<TenantProduct[]>([]);
+  const [categories, setCategories] = useState<TenantCategory[]>([]);
   const [sales, setSales] = useState<TenantSale[]>([]);
   const [shifts, setShifts] = useState<TenantShift[]>([]);
   const [activeShift, setActiveShift] = useState<TenantShift | null>(null);
@@ -107,6 +110,52 @@ export function usePOS(customTenantId?: string) {
     };
   }, []);
 
+  // Real-time listener on tenants/{tenantId}/categories
+  useEffect(() => {
+    const categoriesCol = collection(db, 'tenants', tenantId, 'categories');
+    const unsubscribeCategories = onSnapshot(
+      categoriesCol,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const list: TenantCategory[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data();
+            list.push({
+              id: d.id,
+              name: data.name || '',
+              icon: data.icon || '🏷️',
+              description: data.description || '',
+              createdAt: data.createdAt,
+            });
+          });
+          list.sort((a, b) => a.name.localeCompare(b.name));
+          setCategories(list);
+        } else {
+          // If Firestore categories collection is empty, load defaults and optionally seed
+          const defaultCats = INITIAL_CATEGORIES.map((c) => ({
+            id: c.id,
+            name: c.name,
+            icon: c.icon || '🏷️',
+            description: c.description || '',
+          }));
+          setCategories(defaultCats);
+        }
+      },
+      (err) => {
+        console.warn('Real-time categories snapshot warning:', err);
+        const defaultCats = INITIAL_CATEGORIES.map((c) => ({
+          id: c.id,
+          name: c.name,
+          icon: c.icon || '🏷️',
+          description: c.description || '',
+        }));
+        setCategories(defaultCats);
+      }
+    );
+
+    return () => unsubscribeCategories();
+  }, [tenantId]);
+
   // Real-time listener on tenants/{tenantId}/products
   useEffect(() => {
     setIsLoading(true);
@@ -115,81 +164,93 @@ export function usePOS(customTenantId?: string) {
     const unsubscribeProducts = onSnapshot(
       productsCol,
       (snapshot) => {
-        const list: TenantProduct[] = [];
-        snapshot.forEach((d) => {
-          const data = d.data();
-          list.push({
-            id: d.id,
-            name: data.name || '',
-            category: data.category || 'General',
-            price: Number(data.price) || 0,
-            costPrice: Number(data.costPrice) || 0,
-            stockQuantity: Number(data.stockQuantity) || 0,
-            barcode: data.barcode || '',
-            quickKey: !!data.quickKey,
-            unit: data.unit || 'pcs',
-            lowStockThreshold: data.lowStockThreshold || 10,
-            createdAt: data.createdAt,
-            updatedAt: data.updatedAt,
+        if (!snapshot.empty) {
+          const list: TenantProduct[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data();
+            list.push({
+              id: d.id,
+              name: data.name || '',
+              category: data.category || 'General',
+              price: Number(data.price) || 0,
+              costPrice: Number(data.costPrice) || 0,
+              stockQuantity: Number(data.stockQuantity) || 0,
+              barcode: data.barcode || '',
+              quickKey: !!data.quickKey,
+              unit: data.unit || 'pcs',
+              lowStockThreshold: data.lowStockThreshold || 10,
+              createdAt: data.createdAt,
+              updatedAt: data.updatedAt,
+            });
           });
-        });
-        // Sort products: quick-keys first, then alphabetically
-        list.sort((a, b) => {
-          if (a.quickKey && !b.quickKey) return -1;
-          if (!a.quickKey && b.quickKey) return 1;
-          return a.name.localeCompare(b.name);
-        });
+          // Sort products: quick-keys first, then alphabetically
+          list.sort((a, b) => {
+            if (a.quickKey && !b.quickKey) return -1;
+            if (!a.quickKey && b.quickKey) return 1;
+            return a.name.localeCompare(b.name);
+          });
 
-        if (list.length === 0) {
-          try {
-            const localProds = LocalDb.getProducts();
-            if (localProds && localProds.length > 0) {
-              const fallbackList: TenantProduct[] = localProds.map((lp) => ({
-                id: String(lp.id),
-                name: lp.name,
-                category: lp.category,
-                price: lp.price,
-                costPrice: Math.round(lp.price * 0.75),
-                stockQuantity: lp.stock_qty,
-                barcode: lp.barcode,
-                quickKey: !!lp.is_quick_key,
-                unit: lp.unit || 'pcs',
-                lowStockThreshold: lp.low_stock_threshold || 10,
+          setProducts(list);
+          setIsLoading(false);
+          setError(null);
+        } else {
+          // Auto-seed initial catalog if completely empty
+          AuthService.seedTenantCatalog(tenantId)
+            .then(() => {
+              // Also ensure local state has products immediately
+              const seedList: TenantProduct[] = INITIAL_PRODUCTS.map((p) => ({
+                id: `prod_${p.id}`,
+                name: p.name,
+                category: p.category,
+                price: p.price,
+                costPrice: Math.round(p.price * 0.75),
+                stockQuantity: p.stock_qty,
+                barcode: p.barcode,
+                quickKey: !!p.is_quick_key,
+                unit: p.unit || 'pcs',
+                lowStockThreshold: p.low_stock_threshold || 10,
               }));
-              setProducts(fallbackList);
+              setProducts(seedList);
               setIsLoading(false);
-              setError(null);
-              return;
-            }
-          } catch {
-            // ignore
-          }
+            })
+            .catch(() => {
+              const seedList: TenantProduct[] = INITIAL_PRODUCTS.map((p) => ({
+                id: `prod_${p.id}`,
+                name: p.name,
+                category: p.category,
+                price: p.price,
+                costPrice: Math.round(p.price * 0.75),
+                stockQuantity: p.stock_qty,
+                barcode: p.barcode,
+                quickKey: !!p.is_quick_key,
+                unit: p.unit || 'pcs',
+                lowStockThreshold: p.low_stock_threshold || 10,
+              }));
+              setProducts(seedList);
+              setIsLoading(false);
+            });
         }
-
-        setProducts(list);
-        setIsLoading(false);
-        setError(null);
       },
       (err) => {
         console.warn('Real-time products snapshot warning:', err);
+        // Fallback to local products or initial products
         try {
           const localProds = LocalDb.getProducts();
-          if (localProds && localProds.length > 0) {
-            setProducts(
-              localProds.map((lp) => ({
-                id: String(lp.id),
-                name: lp.name,
-                category: lp.category,
-                price: lp.price,
-                costPrice: Math.round(lp.price * 0.75),
-                stockQuantity: lp.stock_qty,
-                barcode: lp.barcode,
-                quickKey: !!lp.is_quick_key,
-                unit: lp.unit || 'pcs',
-                lowStockThreshold: lp.low_stock_threshold || 10,
-              }))
-            );
-          }
+          const base = localProds && localProds.length > 0 ? localProds : INITIAL_PRODUCTS;
+          setProducts(
+            base.map((lp) => ({
+              id: String(lp.id),
+              name: lp.name,
+              category: lp.category,
+              price: lp.price,
+              costPrice: Math.round(lp.price * 0.75),
+              stockQuantity: lp.stock_qty,
+              barcode: lp.barcode,
+              quickKey: !!lp.is_quick_key,
+              unit: lp.unit || 'pcs',
+              lowStockThreshold: lp.low_stock_threshold || 10,
+            }))
+          );
         } catch {
           // ignore
         }
@@ -269,10 +330,6 @@ export function usePOS(customTenantId?: string) {
 
   /**
    * ATOMIC CHECKOUT FUNCTION
-   * Process sales using Firestore writeBatch:
-   * 1. Save the transaction object under tenants/{tenantId}/sales.
-   * 2. Atomically decrement stock quantities for all purchased items using increment(-quantity).
-   * 3. Fully functional offline via Firestore IndexedDB persistent cache.
    */
   const processSale = useCallback(
     async (params: ProcessSaleParams): Promise<TenantSale> => {
@@ -366,6 +423,18 @@ export function usePOS(customTenantId?: string) {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
+
+        // Also add to local db for instant offline availability
+        LocalDb.addProduct({
+          name: product.name,
+          barcode: product.barcode,
+          category: product.category,
+          price: product.price,
+          stock_qty: product.stockQuantity,
+          unit: product.unit || 'pcs',
+          low_stock_threshold: product.lowStockThreshold || 10,
+        });
+
         return prodId;
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `tenants/${tenantId}/products`);
@@ -375,7 +444,7 @@ export function usePOS(customTenantId?: string) {
   );
 
   /**
-   * Update product stock or details
+   * Update product details (including changing / scanning barcode, price, stock, etc.)
    */
   const updateProduct = useCallback(
     async (id: string, updates: Partial<TenantProduct>): Promise<void> => {
@@ -385,6 +454,25 @@ export function usePOS(customTenantId?: string) {
           ...updates,
           updatedAt: new Date().toISOString(),
         });
+
+        // Update local state immediately
+        setProducts((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p))
+        );
+
+        // Sync with LocalDb
+        const numericId = Number(id.replace(/\D/g, '')) || 0;
+        if (numericId > 0) {
+          LocalDb.updateProduct(numericId, {
+            name: updates.name,
+            barcode: updates.barcode,
+            category: updates.category,
+            price: updates.price,
+            stock_qty: updates.stockQuantity,
+            unit: updates.unit,
+            low_stock_threshold: updates.lowStockThreshold,
+          });
+        }
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, `tenants/${tenantId}/products/${id}`);
       }
@@ -400,12 +488,73 @@ export function usePOS(customTenantId?: string) {
       try {
         const ref = doc(db, 'tenants', tenantId, 'products', id);
         await deleteDoc(ref);
+        setProducts((prev) => prev.filter((p) => p.id !== id));
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, `tenants/${tenantId}/products/${id}`);
       }
     },
     [tenantId]
   );
+
+  /**
+   * Add a new category
+   */
+  const addCategory = useCallback(
+    async (category: { name: string; icon?: string; description?: string }): Promise<TenantCategory> => {
+      try {
+        const newCat = await AuthService.addTenantCategory(tenantId, category);
+        // Also add to LocalDb
+        LocalDb.addCategory({
+          name: category.name,
+          icon: category.icon,
+          description: category.description,
+        });
+        setCategories((prev) => {
+          if (prev.some((c) => c.name.toLowerCase() === category.name.trim().toLowerCase())) return prev;
+          return [...prev, newCat];
+        });
+        return newCat;
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `tenants/${tenantId}/categories`);
+      }
+    },
+    [tenantId]
+  );
+
+  /**
+   * Delete a category
+   */
+  const deleteCategory = useCallback(
+    async (categoryId: string): Promise<void> => {
+      try {
+        await AuthService.deleteTenantCategory(tenantId, categoryId);
+        LocalDb.deleteCategory(categoryId);
+        setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `tenants/${tenantId}/categories/${categoryId}`);
+      }
+    },
+    [tenantId]
+  );
+
+  /**
+   * One-click seed / restore the complete catalog of products and categories
+   */
+  const seedFullCatalog = useCallback(async (): Promise<void> => {
+    setIsLoading(true);
+    try {
+      await AuthService.seedTenantCatalog(tenantId);
+      // Seed LocalDb as well
+      const currentProducts = LocalDb.getProducts();
+      if (currentProducts.length === 0) {
+        localStorage.setItem('bazu_pos_products', JSON.stringify(INITIAL_PRODUCTS));
+      }
+      setIsLoading(false);
+    } catch (err) {
+      console.warn('seedFullCatalog error:', err);
+      setIsLoading(false);
+    }
+  }, [tenantId]);
 
   /**
    * Start a new Cashier Shift
@@ -457,6 +606,7 @@ export function usePOS(customTenantId?: string) {
   return {
     tenantId,
     products,
+    categories,
     sales,
     shifts,
     activeShift,
@@ -467,6 +617,9 @@ export function usePOS(customTenantId?: string) {
     addProduct,
     updateProduct,
     deleteProduct,
+    addCategory,
+    deleteCategory,
+    seedFullCatalog,
     startShift,
     closeShift,
   };

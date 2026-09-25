@@ -845,15 +845,21 @@ export class LocalDb {
     const deletedIds = this.getDeletedProductIds();
     const raw = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (!raw) {
-      return [];
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
+      return INITIAL_PRODUCTS.filter((p) => !deletedIds.has(Number(p.id)));
     }
     try {
       const parsed: Product[] = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        return [];
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
+        return INITIAL_PRODUCTS.filter((p) => !deletedIds.has(Number(p.id)));
       }
 
       const list = parsed.filter((p) => !deletedIds.has(Number(p.id)));
+      if (list.length === 0 && deletedIds.size === 0) {
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
+        return INITIAL_PRODUCTS;
+      }
       const seenIds = new Set<number>();
       let maxId = 0;
       for (const p of list) {
@@ -882,12 +888,13 @@ export class LocalDb {
       }
       return deduplicated;
     } catch {
-      return [];
+      localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
+      return INITIAL_PRODUCTS.filter((p) => !deletedIds.has(Number(p.id)));
     }
   }
 
   static updateProduct(
-    id: number,
+    id: number | string,
     updates: Partial<Product>,
     userRole?: UserRole
   ): { success: boolean; product?: Product; error?: string } {
@@ -901,10 +908,13 @@ export class LocalDb {
     }
 
     const products = this.getProducts();
-    const existing = products.find((p) => p.id === id);
+    const numId = typeof id === 'number' ? id : (Number(String(id).replace(/\D/g, '')) || 0);
+    const existing = products.find((p) => p.id === numId || String(p.id) === String(id));
     if (!existing) {
       return { success: false, error: 'Product not found.' };
     }
+
+    const resolvedId = existing.id;
 
     // Strict Cashier Stock Protection: Cashiers cannot directly alter stock.
     // Stock additions must be performed via receipt scanning and upload.
@@ -919,14 +929,14 @@ export class LocalDb {
 
     if (updates.barcode) {
       const cleanBarcode = updates.barcode.trim();
-      if (products.some((p) => p.id !== id && p.barcode === cleanBarcode)) {
+      if (products.some((p) => p.id !== resolvedId && p.barcode === cleanBarcode)) {
         return { success: false, error: `Barcode "${cleanBarcode}" is already assigned to another product.` };
       }
       updates.barcode = cleanBarcode;
     }
 
     const updatedProducts = products.map((p) => {
-      if (p.id === id) {
+      if (p.id === resolvedId) {
         return { ...p, ...updates };
       }
       return p;
@@ -3018,7 +3028,8 @@ export class LocalDb {
 
       // Purge demo products, sales, customers, and store config from previous sessions
       if (isLegacyBuzz || !setupCompleted) {
-        localStorage.removeItem('bazu_pos_products');
+        localStorage.setItem('bazu_pos_products', JSON.stringify(INITIAL_PRODUCTS));
+        localStorage.setItem('bazu_pos_categories', JSON.stringify(INITIAL_CATEGORIES));
         localStorage.removeItem('bazu_pos_sales');
         localStorage.removeItem('bazu_pos_sale_items');
         localStorage.removeItem('bazu_pos_customers');
@@ -3026,7 +3037,6 @@ export class LocalDb {
         localStorage.removeItem('bazu_pos_customer_tabs');
         localStorage.removeItem('bazu_pos_shifts');
         localStorage.removeItem('bazu_pos_cash_adjustments');
-        localStorage.removeItem('bazu_pos_store_config');
         localStorage.removeItem('bazu_pos_active_store_id');
         localStorage.removeItem('bazu_pos_registered_stores');
         localStorage.removeItem('bazu_pos_deleted_product_ids');
