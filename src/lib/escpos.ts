@@ -215,7 +215,7 @@ export function buildESCPOSThermalReceipt(data: ESCPOSReceiptData): Uint8Array {
 /**
  * Web Bluetooth Thermal Printer Connection & Print
  */
-export async function printViaWebBluetooth(receiptData: ESCPOSReceiptData): Promise<{ success: boolean; message: string }> {
+export async function printViaWebBluetooth(receiptDataOrBytes: ESCPOSReceiptData | Uint8Array): Promise<{ success: boolean; message: string }> {
   if (typeof navigator === 'undefined' || !(navigator as any).bluetooth) {
     return {
       success: false,
@@ -224,7 +224,9 @@ export async function printViaWebBluetooth(receiptData: ESCPOSReceiptData): Prom
   }
 
   try {
-    const rawBytes = buildESCPOSThermalReceipt(receiptData);
+    const rawBytes = receiptDataOrBytes instanceof Uint8Array
+      ? receiptDataOrBytes
+      : buildESCPOSThermalReceipt(receiptDataOrBytes);
 
     const device = await (navigator as any).bluetooth.requestDevice({
       filters: [
@@ -282,7 +284,7 @@ export async function printViaWebBluetooth(receiptData: ESCPOSReceiptData): Prom
 /**
  * WebUSB Thermal Printer Connection & Print
  */
-export async function printViaWebUSB(receiptData: ESCPOSReceiptData): Promise<{ success: boolean; message: string }> {
+export async function printViaWebUSB(receiptDataOrBytes: ESCPOSReceiptData | Uint8Array): Promise<{ success: boolean; message: string }> {
   if (typeof navigator === 'undefined' || !(navigator as any).usb) {
     return {
       success: false,
@@ -291,7 +293,9 @@ export async function printViaWebUSB(receiptData: ESCPOSReceiptData): Promise<{ 
   }
 
   try {
-    const rawBytes = buildESCPOSThermalReceipt(receiptData);
+    const rawBytes = receiptDataOrBytes instanceof Uint8Array
+      ? receiptDataOrBytes
+      : buildESCPOSThermalReceipt(receiptDataOrBytes);
     const device = await (navigator as any).usb.requestDevice({ filters: [] });
     await device.open();
     if (device.configuration === null) {

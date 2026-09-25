@@ -1088,6 +1088,9 @@ export class LocalDb {
     saleData: {
       cashier_name: string;
       payment_method: PaymentMethod;
+      split_cash_amount?: number;
+      split_mpesa_amount?: number;
+      split_other_amount?: number;
       mpesa_code?: string;
       cash_tendered?: number;
       change_given?: number;
@@ -1097,8 +1100,12 @@ export class LocalDb {
       amount_paid?: number;
       debt_amount?: number;
       payment_status?: SalePaymentStatus;
+      discount_amount?: number;
+      discount_percent?: number;
+      discount_reason?: string;
+      discount_authorized_by?: string;
     },
-    cartItems: { product: Product; quantity: number }[]
+    cartItems: CartItem[]
   ): { success: boolean; sale?: Sale; items?: SaleItem[]; error?: string } {
     const products = this.getProducts();
 

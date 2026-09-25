@@ -1,35 +1,90 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // POS retail application: terminals on phones, tablets, and desktop computers
-    // sync live inventory, sales, staff accounts, and store configs in real-time.
-    match /products/{productId} {
-      allow read, write: if true;
+
+    function isSignedIn() {
+      return request.auth != null;
     }
-    match /sales/{saleId} {
-      allow read, write: if true;
+
+    function isTenantUser(tenantId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
     }
-    match /sale_items/{itemId} {
-      allow read, write: if true;
+
+    function getTenantUser(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid)).data;
     }
-    match /users/{userId} {
-      allow read, write: if true;
+
+    function isTenantAdmin(tenantId) {
+      return isTenantUser(tenantId) && (getTenantUser(tenantId).role in ['admin', 'super_admin']);
     }
-    match /store_config/{configId} {
-      allow read, write: if true;
+
+    function isSubscriptionActive(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)).data.subscriptionStatus in ['active', 'trial'];
     }
-    match /categories/{categoryId} {
-      allow read, write: if true;
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
     }
-    match /customers/{customerId} {
-      allow read, write: if true;
+
+    // Multi-tenant root structure: tenants/{tenantId}
+    match /tenants/{tenantId} {
+      // Tenant document read & writes
+      allow read: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isTenantUser(tenantId)
+      );
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.ownerUid == request.auth.uid ||
+        isTenantAdmin(tenantId)
+      );
+
+      // Subcollection: users/{userId}
+      match /users/{userId} {
+        allow read: if isTenantUser(tenantId);
+        allow create: if isSignedIn() && (
+          request.auth.uid == userId ||
+          isTenantAdmin(tenantId)
+        );
+        allow update, delete: if isSignedIn() && (
+          request.auth.uid == userId ||
+          isTenantAdmin(tenantId)
+        );
+      }
+
+      // Subcollection: products/{productId}
+      match /products/{productId} {
+        allow read: if isTenantUser(tenantId);
+        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
+      }
+
+      // Subcollection: sales/{saleId}
+      match /sales/{saleId} {
+        allow read: if isTenantUser(tenantId);
+        allow create: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
+        allow update, delete: if isTenantAdmin(tenantId);
+      }
+
+      // Subcollection: shifts/{shiftId}
+      match /shifts/{shiftId} {
+        allow read: if isTenantUser(tenantId);
+        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
+      }
     }
-    match /customer_payments/{paymentId} {
-      allow read, write: if true;
-    }
-    // Multi-store isolated collections (e.g. stores/the_buzz_liquor/*, stores/early_kick_off/*)
+
+    // Multi-store backwards-compatible paths
     match /stores/{storeId}/{document=**} {
       allow read, write: if true;
     }
+    match /products/{id} { allow read, write: if true; }
+    match /sales/{id} { allow read, write: if true; }
+    match /sale_items/{id} { allow read, write: if true; }
+    match /users/{id} { allow read, write: if true; }
+    match /store_config/{id} { allow read, write: if true; }
+    match /categories/{id} { allow read, write: if true; }
+    match /customers/{id} { allow read, write: if true; }
+    match /customer_payments/{id} { allow read, write: if true; }
+    match /requisitions/{id} { allow read, write: if true; }
   }
 }

@@ -1,129 +1,94 @@
 {
   "entities": {
-    "products": {
-      "title": "Product",
-      "description": "Inventory product item in the POS store",
+    "tenants": {
+      "title": "Tenant",
+      "description": "Multi-tenant merchant store organization",
       "type": "object",
       "properties": {
-        "id": { "type": "number", "description": "Unique numeric ID of the product" },
-        "barcode": { "type": "string", "description": "Barcode or SKU for scanning" },
-        "name": { "type": "string", "description": "Product display name" },
-        "category": { "type": "string", "description": "Beverage category" },
-        "price": { "type": "number", "description": "Selling price in KES" },
-        "stock_qty": { "type": "number", "description": "Current on-hand stock quantity" },
-        "unit": { "type": "string", "description": "Unit volume or size e.g. 500ml" },
-        "updated_at": { "type": "string", "description": "Last update ISO timestamp" }
+        "businessName": { "type": "string", "description": "Business or merchant name" },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of merchant store owner" },
+        "subscriptionStatus": { "type": "string", "description": "Subscription state active, trial, past_due, cancelled" },
+        "plan": { "type": "string", "description": "Pricing tier e.g. starter, pro, enterprise" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" }
       },
-      "required": ["id", "barcode", "name", "category", "price", "stock_qty", "unit"]
+      "required": ["businessName", "ownerUid", "subscriptionStatus", "plan", "createdAt"]
     },
-    "sales": {
-      "title": "Sale",
-      "description": "Completed sales transaction record",
+    "tenant_users": {
+      "title": "TenantUser",
+      "description": "User associated with a specific tenant business",
       "type": "object",
       "properties": {
-        "id": { "type": "number", "description": "Numeric transaction receipt number" },
-        "cashier_name": { "type": "string", "description": "Name of the cashier who processed the sale" },
-        "total_amount": { "type": "number", "description": "Total order amount in KES" },
-        "payment_method": { "type": "string", "description": "Payment mode CASH or MPESA" },
-        "created_at": { "type": "string", "description": "Transaction completion timestamp" },
-        "mpesa_code": { "type": "string", "description": "M-Pesa confirmation code if applicable" },
-        "cash_tendered": { "type": "number", "description": "Cash given by customer" },
-        "change_given": { "type": "number", "description": "Change returned to customer" },
-        "items_count": { "type": "number", "description": "Count of items purchased" }
-      },
-      "required": ["id", "cashier_name", "total_amount", "payment_method", "created_at", "items_count"]
-    },
-    "sale_items": {
-      "title": "SaleItem",
-      "description": "Itemized line item within a sale",
-      "type": "object",
-      "properties": {
-        "id": { "type": "number", "description": "Unique line item ID" },
-        "sale_id": { "type": "number", "description": "Associated sale receipt ID" },
-        "product_id": { "type": "number", "description": "Associated product ID" },
-        "product_name": { "type": "string", "description": "Name of product at time of sale" },
-        "quantity": { "type": "number", "description": "Quantity purchased" },
-        "unit_price": { "type": "number", "description": "Unit price in KES" },
-        "total_price": { "type": "number", "description": "Line item total amount in KES" }
-      },
-      "required": ["id", "sale_id", "product_id", "product_name", "quantity", "unit_price", "total_price"]
-    },
-    "users": {
-      "title": "User",
-      "description": "Staff member account for POS and Admin access",
-      "type": "object",
-      "properties": {
-        "id": { "type": "number", "description": "Unique numeric user ID" },
+        "email": { "type": "string", "description": "Staff or merchant email address" },
+        "role": { "type": "string", "description": "Role: super_admin, admin, manager, cashier" },
         "name": { "type": "string", "description": "Full staff name" },
-        "username": { "type": "string", "description": "Username used for login" },
-        "pin": { "type": "string", "description": "Security PIN or password" },
-        "role": { "type": "string", "description": "Assigned role ADMIN, SUPERVISOR, ACCOUNTANT, SALES_CASHIER" },
-        "status": { "type": "string", "description": "ACTIVE or SUSPENDED" },
-        "suspended": { "type": "boolean", "description": "Suspension flag" },
-        "must_change_password": { "type": "boolean", "description": "Whether user is required to change password on next login" },
-        "has_changed_initial_password": { "type": "boolean", "description": "Whether user has changed initial default password" },
-        "created_at": { "type": "string", "description": "Account creation timestamp" }
+        "pinHash": { "type": "string", "description": "Quick terminal login PIN hash" }
       },
-      "required": ["id", "name", "role", "pin"]
+      "required": ["email", "role", "name", "pinHash"]
     },
-    "store_config": {
-      "title": "StoreConfig",
-      "description": "Store branding and checkout configuration",
+    "tenant_products": {
+      "title": "TenantProduct",
+      "description": "Catalog product for this specific merchant tenant",
       "type": "object",
       "properties": {
-        "id": { "type": "number", "description": "Config record ID" },
-        "store_name": { "type": "string", "description": "Store name printed on receipts" },
-        "branch": { "type": "string", "description": "Branch location" },
-        "phone_number": { "type": "string", "description": "Support and Till phone number" },
-        "till_number": { "type": "string", "description": "M-Pesa Buy Goods Till number" },
-        "receipt_footer": { "type": "string", "description": "Footer message on receipt" },
-        "primary_color": { "type": "string", "description": "UI theme accent color" }
+        "name": { "type": "string", "description": "Product display name" },
+        "category": { "type": "string", "description": "Product category" },
+        "price": { "type": "number", "description": "Selling price in KES" },
+        "costPrice": { "type": "number", "description": "Wholesale cost price" },
+        "stockQuantity": { "type": "number", "description": "Current on-hand inventory count" },
+        "barcode": { "type": "string", "description": "Barcode or SKU for scanning" },
+        "quickKey": { "type": "boolean", "description": "Whether starred in the quick keys grid" }
       },
-      "required": ["store_name", "branch", "till_number"]
+      "required": ["name", "category", "price", "stockQuantity"]
     },
-    "categories": {
-      "title": "Category",
-      "description": "Product beverage and merchandise category",
+    "tenant_sales": {
+      "title": "TenantSale",
+      "description": "Point-of-Sale completed transaction",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Category unique slug identifier" },
-        "name": { "type": "string", "description": "Display name of the category" },
-        "description": { "type": "string", "description": "Optional category description" },
-        "icon": { "type": "string", "description": "Optional emoji or icon symbol" },
-        "created_at": { "type": "string", "description": "Creation timestamp" }
+        "items": { "type": "array", "description": "Itemized line items purchased" },
+        "totalAmount": { "type": "number", "description": "Total order amount in KES" },
+        "paymentMethod": { "type": "string", "description": "Payment tender CASH, MPESA, CARD, SPLIT, DEBT" },
+        "referenceCode": { "type": "string", "description": "Receipt reference or M-Pesa transaction code" },
+        "cashierId": { "type": "string", "description": "ID or UID of the cashier who handled the transaction" },
+        "createdAt": { "type": "string", "description": "ISO transaction timestamp" }
       },
-      "required": ["id", "name"]
+      "required": ["items", "totalAmount", "paymentMethod", "referenceCode", "cashierId", "createdAt"]
     },
-    "customers": {
-      "title": "Customer",
-      "description": "Patron profile tracking purchase history and credit debt",
+    "tenant_shifts": {
+      "title": "TenantShift",
+      "description": "Cashier shift record and drawer reconciliation",
       "type": "object",
       "properties": {
-        "id": { "type": "number", "description": "Unique numeric customer ID" },
-        "name": { "type": "string", "description": "Full customer name" },
-        "phone": { "type": "string", "description": "Customer phone number for WhatsApp and SMS" },
-        "email": { "type": "string", "description": "Optional customer email" },
-        "notes": { "type": "string", "description": "Staff notes regarding customer" },
-        "created_at": { "type": "string", "description": "Registration ISO timestamp" }
+        "cashierId": { "type": "string", "description": "Cashier identifier" },
+        "openTime": { "type": "string", "description": "Shift opening timestamp" },
+        "closeTime": { "type": "string", "description": "Shift closing timestamp" },
+        "openingCash": { "type": "number", "description": "Starting cash float" },
+        "closingCash": { "type": "number", "description": "Closing cash drawer count" },
+        "totalSales": { "type": "number", "description": "Total sales accumulated during this shift" }
       },
-      "required": ["id", "name", "phone"]
+      "required": ["cashierId", "openTime", "openingCash"]
+    }
+  },
+  "firestore": {
+    "/tenants/{tenantId}": {
+      "schema": "tenants",
+      "description": "Root tenant organization document"
     },
-    "customer_payments": {
-      "title": "CustomerPayment",
-      "description": "Debt settlement and repayment transaction record",
-      "type": "object",
-      "properties": {
-        "id": { "type": "number", "description": "Unique numeric payment ID" },
-        "customer_id": { "type": "number", "description": "Associated customer ID" },
-        "customer_name": { "type": "string", "description": "Name of customer paying" },
-        "amount": { "type": "number", "description": "Amount paid towards debt in KES" },
-        "payment_method": { "type": "string", "description": "Payment mode CASH or MPESA" },
-        "mpesa_code": { "type": "string", "description": "M-Pesa confirmation code" },
-        "cashier_name": { "type": "string", "description": "Staff member who received the payment" },
-        "created_at": { "type": "string", "description": "Payment ISO timestamp" },
-        "notes": { "type": "string", "description": "Optional payment notes" }
-      },
-      "required": ["id", "customer_id", "customer_name", "amount", "payment_method", "cashier_name", "created_at"]
+    "/tenants/{tenantId}/users/{userId}": {
+      "schema": "tenant_users",
+      "description": "Tenant staff accounts and permissions"
+    },
+    "/tenants/{tenantId}/products/{productId}": {
+      "schema": "tenant_products",
+      "description": "Tenant isolated inventory catalog"
+    },
+    "/tenants/{tenantId}/sales/{saleId}": {
+      "schema": "tenant_sales",
+      "description": "Tenant isolated completed transactions"
+    },
+    "/tenants/{tenantId}/shifts/{shiftId}": {
+      "schema": "tenant_shifts",
+      "description": "Tenant cashier shift records and X/Z reports"
     }
   }
 }
