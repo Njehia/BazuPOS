@@ -408,16 +408,26 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
                 </button>
               </div>
 
-              {/* Low stock warning limit */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800/80">
-                <span className="text-slate-600 dark:text-slate-400">Low Stock Alert Threshold:</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={lowStockThreshold}
-                  onChange={(e) => setLowStockThreshold(e.target.value)}
-                  className="w-16 px-2 py-1 text-center rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
+              {/* Reorder quantity threshold warning limit */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800/80 gap-2">
+                <div>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs block">
+                    Reorder Quantity Threshold:
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Triggers automated reorder alerts when stock is at or below this level
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                  <input
+                    type="number"
+                    min="0"
+                    value={lowStockThreshold}
+                    onChange={(e) => setLowStockThreshold(e.target.value)}
+                    className="w-20 px-2 py-1 text-center font-bold text-sm rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-xs text-slate-400 font-medium">units</span>
+                </div>
               </div>
             </div>
 

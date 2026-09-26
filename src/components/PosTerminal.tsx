@@ -29,6 +29,7 @@ import {
   User,
   Users,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CartItem,
@@ -46,6 +47,7 @@ import {
   getRoleLabel,
 } from '../types';
 import { LocalDb } from '../lib/storage';
+import { INITIAL_PRODUCTS, INITIAL_CATEGORIES } from '../data/seedData';
 import { applyStoreTheme } from '../lib/theme';
 import { CheckoutModal } from './CheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
@@ -66,9 +68,10 @@ import { FirstTimeSetupModal } from './FirstTimeSetupModal';
 interface PosTerminalProps {
   currentUser: UserModel;
   onLogout: () => void;
+  onOpenNewStore?: () => void;
 }
 
-export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout }) => {
+export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout, onOpenNewStore }) => {
   // Inventory state from local storage
   const [products, setProducts] = useState<Product[]>(() => LocalDb.getProducts());
   const [categoriesList, setCategoriesList] = useState<Category[]>(() => LocalDb.getCategories());
@@ -897,18 +900,16 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
                   </kbd>
                 </button>
 
-                {/* Quick Add / Manage Category button for Admin */}
-                {currentUser.role === 'ADMIN' && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAdmin('categories')}
-                    className="px-3 py-2 rounded-xl text-xs whitespace-nowrap bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-300 font-bold border border-dashed border-amber-300 dark:border-amber-700 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
-                    title="Create a new liquor category in Admin Panel"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    <span>+ Category</span>
-                  </button>
-                )}
+                {/* Quick Add / Manage Category button */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenAdmin('categories')}
+                  className="px-3 py-2 rounded-xl text-xs whitespace-nowrap bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-amber-900 dark:text-amber-300 font-bold border border-dashed border-amber-300 dark:border-amber-700 transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
+                  title="Create or manage product categories"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>+ Category</span>
+                </button>
               </div>
 
               {/* Product Grid */}
@@ -923,18 +924,23 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
                         Inventory is Currently Empty
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
-                        Stock your store catalog by scanning a distributor receipt/invoice or adding products manually.
+                        Stock your store catalog by loading 150+ realistic retail products or adding them manually.
                       </p>
                     </div>
 
                     <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-2">
                       <button
                         type="button"
-                        onClick={() => setIsSmartStockOpen(true)}
+                        onClick={() => {
+                          localStorage.setItem('bazu_pos_products', JSON.stringify(INITIAL_PRODUCTS));
+                          localStorage.setItem('bazu_pos_categories', JSON.stringify(INITIAL_CATEGORIES));
+                          setProducts(LocalDb.getProducts());
+                          setCategoriesList(LocalDb.getCategories());
+                        }}
                         className="w-full sm:flex-1 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
                       >
-                        <Sparkles className="w-4 h-4" />
-                        <span>Scan Receipt / Invoice</span>
+                        <RefreshCw className="w-4 h-4" />
+                        <span>Load 150+ Catalog</span>
                       </button>
 
                       <button
@@ -1260,6 +1266,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout 
             refreshInventory();
           }}
           onInventoryChanged={refreshInventory}
+          onOpenNewStore={onOpenNewStore}
           onStoreConfigChanged={(cfg) => {
             setStoreConfig(cfg);
             applyStoreTheme(cfg);

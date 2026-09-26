@@ -24,9 +24,10 @@ export interface OfflineStatus {
 }
 
 const DB_NAME = 'bazu_pos_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const QUEUE_STORE = 'sync_queue';
 const DRAFT_STORE = 'draft_orders';
+const BACKUP_STORE = 'system_backups';
 
 class OfflineQueueManager {
   private db: IDBDatabase | null = null;
@@ -80,6 +81,9 @@ class OfflineQueueManager {
           }
           if (!db.objectStoreNames.contains(DRAFT_STORE)) {
             db.createObjectStore(DRAFT_STORE, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(BACKUP_STORE)) {
+            db.createObjectStore(BACKUP_STORE, { keyPath: 'id' });
           }
         };
 
@@ -370,6 +374,43 @@ class OfflineQueueManager {
     } else {
       localStorage.removeItem(`bazu_pos_draft_${draftId}`);
     }
+  }
+
+  async saveBackupSnapshot(snapshot: any): Promise<void> {
+    const db = await this.initDB();
+    if (!db || !db.objectStoreNames.contains(BACKUP_STORE)) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction([BACKUP_STORE], 'readwrite');
+        const store = tx.objectStore(BACKUP_STORE);
+        store.put({ id: `snapshot_${Date.now()}`, timestamp: new Date().toISOString(), data: snapshot });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  async getLatestBackupSnapshot(): Promise<any | null> {
+    const db = await this.initDB();
+    if (!db || !db.objectStoreNames.contains(BACKUP_STORE)) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction([BACKUP_STORE], 'readonly');
+        const store = tx.objectStore(BACKUP_STORE);
+        const req = store.getAll();
+        req.onsuccess = () => {
+          const list = req.result || [];
+          if (list.length === 0) return resolve(null);
+          list.sort((a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+          resolve(list[0]?.data || null);
+        };
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
   }
 }
 

@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig(() => {
   return {
+    base: './', // CRITICAL: Ensures relative asset loading (./assets/...) for Electron
     plugins: [
       react(),
       tailwindcss(),
@@ -19,7 +20,6 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio iframe environment to prevent WebSocket errors.
       hmr: false,
       watch: null,
     },

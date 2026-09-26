@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Banknote,
+  Building,
   Calendar,
   Check,
   CheckCircle2,
@@ -79,6 +80,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { FirstTimeSetupModal } from './FirstTimeSetupModal';
+import { MerchantSignupModal } from './MerchantSignupModal';
 
 export type AdminTab = 'inventory' | 'requisitions' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
@@ -91,6 +93,7 @@ interface AdminOverlayProps {
   onInventoryChanged: () => void;
   onStoreConfigChanged: (config: StoreConfig) => void;
   onSelectCustomerForSale?: (customer: any) => void;
+  onOpenNewStore?: () => void;
 }
 
 export const AdminOverlay: React.FC<AdminOverlayProps> = ({
@@ -102,8 +105,10 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   onInventoryChanged,
   onStoreConfigChanged,
   onSelectCustomerForSale,
+  onOpenNewStore,
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab || 'inventory');
+  const [isMerchantSignupOpen, setIsMerchantSignupOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>(() => LocalDb.getProducts());
   const [requisitions, setRequisitions] = useState<Requisition[]>(() => LocalDb.getRequisitions());
   const pendingRequisitionsCount = useMemo(
@@ -2690,6 +2695,40 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               </button>
             </div>
 
+            {/* Multi-Store & Branch Network (Admin Only) */}
+            {isAdmin && (
+              <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-700 shrink-0">
+                    <Building className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm text-slate-900">Multi-Store &amp; Branch Network</h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
+                        Admin Only
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Provision a new store branch, register additional merchant outlets, or onboard new storefronts.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenNewStore) onOpenNewStore();
+                    else setIsMerchantSignupOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-amber-500/20 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Add New Store</span>
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSaveConfig} className="space-y-4 text-xs">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Store / Business Name</label>
@@ -4186,6 +4225,18 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
             setStoreConfig(fresh);
             onStoreConfigChanged(fresh);
             onInventoryChanged();
+          }}
+        />
+      )}
+
+      {/* MULTI-STORE MULTI-TENANT MERCHANT SIGNUP MODAL */}
+      {isMerchantSignupOpen && (
+        <MerchantSignupModal
+          isOpen={isMerchantSignupOpen}
+          onClose={() => setIsMerchantSignupOpen(false)}
+          onSuccess={() => {
+            setIsMerchantSignupOpen(false);
+            if (onOpenNewStore) onOpenNewStore();
           }}
         />
       )}

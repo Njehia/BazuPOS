@@ -26,12 +26,16 @@ import {
   AlertTriangle,
   QrCode,
   Store,
+  Edit2,
+  RefreshCw,
 } from 'lucide-react';
 import { usePOS, TenantProduct } from '../hooks/usePOS';
 import { CartItem, ProductVariant, User } from '../types';
 import { printViaWebBluetooth, printViaWebUSB, ESCPOSReceiptData } from '../lib/escpos';
 import { ManagerPinOverrideModal } from './ManagerPinOverrideModal';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { AddCategoryModal } from './AddCategoryModal';
+import { EditProductModal, EditableProductData } from './EditProductModal';
 import { AuthService, TenantMetadata } from '../services/auth';
 
 interface CheckoutTerminalProps {
@@ -48,8 +52,13 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
   const {
     tenantId,
     products,
+    categories: tenantCategories,
     isOnline,
     processSale,
+    updateProduct,
+    deleteProduct,
+    addCategory,
+    seedFullCatalog,
     activeShift,
     startShift,
     closeShift,
@@ -87,6 +96,12 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [lastCompletedSale, setLastCompletedSale] = useState<any | null>(null);
 
+  // Category and Product Modals
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<EditableProductData | null>(null);
+  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+
   // Load tenant metadata
   useEffect(() => {
     AuthService.getActiveTenantMetadata(tenantId).then((meta) => {
@@ -94,14 +109,47 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
     });
   }, [tenantId]);
 
-  // Extract categories
+  // Extract categories (from both registered categories and products)
   const categories = useMemo(() => {
     const set = new Set<string>();
+    if (tenantCategories) {
+      tenantCategories.forEach((c) => {
+        if (c.name) set.add(c.name);
+      });
+    }
     products.forEach((p) => {
       if (p.category) set.add(p.category);
     });
     return ['ALL', ...Array.from(set)];
-  }, [products]);
+  }, [tenantCategories, products]);
+
+  // Category objects for modal
+  const categoryObjects = useMemo(() => {
+    return categories
+      .filter((c) => c !== 'ALL')
+      .map((c) => {
+        const found = tenantCategories?.find((tc) => tc.name === c);
+        return {
+          id: found?.id || c.toLowerCase().replace(/\s+/g, '_'),
+          name: c,
+          icon: found?.icon || '🏷️',
+        };
+      });
+  }, [categories, tenantCategories]);
+
+  const handleSaveCategory = async (newCat: { name: string; icon?: string; description?: string }) => {
+    await addCategory(newCat);
+    setSelectedCategory(newCat.name);
+    setFeedbackToast(`Category "${newCat.name}" added successfully!`);
+    setTimeout(() => setFeedbackToast(null), 3000);
+  };
+
+  const handleSaveProduct = async (id: string, updates: Partial<EditableProductData>) => {
+    await updateProduct(id, updates);
+    setFeedbackToast(`Product "${updates.name || ''}" updated with barcode ${updates.barcode || ''}!`);
+    setTimeout(() => setFeedbackToast(null), 3500);
+    setShowEditProductModal(false);
+  };
 
   // Filter products
   const filteredProducts = useMemo(() => {
@@ -510,7 +558,7 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
             </button>
           </div>
 
-          {/* Category Pills Strip */}
+          {/* Category Pills Strip with Add Category Button */}
           <div className="px-3 py-2 border-b border-slate-800/80 bg-slate-950/20 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
             {categories.map((cat) => (
               <button
@@ -525,7 +573,25 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
                 {cat}
               </button>
             ))}
+
+            {/* + Add Category Button */}
+            <button
+              onClick={() => setShowAddCategoryModal(true)}
+              className="px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+              title="Add a new category"
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Add Category</span>
+            </button>
           </div>
+
+          {/* Feedback Toast Notification */}
+          {feedbackToast && (
+            <div className="mx-3 mt-2 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center justify-between animate-in fade-in">
+              <span>{feedbackToast}</span>
+              <button onClick={() => setFeedbackToast(null)} className="text-amber-400 hover:text-white ml-2">✕</button>
+            </div>
+          )}
 
           {/* Products Grid */}
           <div className="flex-1 p-3 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
@@ -535,16 +601,48 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
                 onClick={() => addToCart(product)}
                 className="group p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-amber-500/40 transition-all cursor-pointer flex flex-col justify-between relative overflow-hidden active:scale-[0.98]"
               >
-                {product.quickKey && (
-                  <span className="absolute top-2 right-2 text-amber-400 text-xs">★</span>
-                )}
+                {/* Top action strip: Quick Key badge + Edit Product / Barcode Button */}
+                <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+                  {product.quickKey && (
+                    <span className="text-amber-400 text-xs font-bold mr-0.5">★</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setProductToEdit({
+                        id: product.id,
+                        name: product.name,
+                        category: product.category,
+                        price: product.price,
+                        costPrice: product.costPrice,
+                        stockQuantity: product.stockQuantity,
+                        barcode: product.barcode,
+                        quickKey: product.quickKey,
+                        unit: product.unit,
+                        lowStockThreshold: product.lowStockThreshold,
+                      });
+                      setShowEditProductModal(true);
+                    }}
+                    className="p-1 rounded-md bg-slate-700/80 hover:bg-amber-500 hover:text-slate-950 text-slate-300 transition-colors shadow-sm cursor-pointer"
+                    title="Edit product details or scan/change barcode"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400/80 block">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400/80 block pr-8">
                     {product.category}
                   </span>
                   <h3 className="font-bold text-sm text-white line-clamp-2 mt-0.5 leading-snug">
                     {product.name}
                   </h3>
+                  {product.barcode && (
+                    <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
+                      {product.barcode}
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-3 flex items-center justify-between pt-2 border-t border-slate-700/50">
@@ -565,10 +663,25 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
             ))}
 
             {filteredProducts.length === 0 && (
-              <div className="col-span-full h-64 flex flex-col items-center justify-center text-slate-500">
+              <div className="col-span-full h-64 flex flex-col items-center justify-center text-slate-500 p-4 text-center">
                 <Store className="w-12 h-12 stroke-1 mb-2 text-slate-600" />
-                <p className="font-semibold text-sm">No products found</p>
-                <p className="text-xs text-slate-600">Try changing category or search query</p>
+                <p className="font-semibold text-sm text-slate-300">
+                  {products.length === 0 ? 'No products in database' : 'No products match your filter'}
+                </p>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                  {products.length === 0
+                    ? 'Populate the terminal with over 150+ realistic retail products across 22 categories in one tap.'
+                    : 'Try clearing your search query or switching categories.'}
+                </p>
+                {products.length === 0 && (
+                  <button
+                    onClick={() => seedFullCatalog()}
+                    className="mt-3.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Load 150+ Products &amp; Categories</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -917,6 +1030,37 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
               setCart((prev) => prev.filter((_, i) => i !== managerAction.targetIndex));
             }
             setShowManagerPinModal(false);
+          }}
+        />
+      )}
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <AddCategoryModal
+          isOpen={showAddCategoryModal}
+          onClose={() => setShowAddCategoryModal(false)}
+          onSave={handleSaveCategory}
+        />
+      )}
+
+      {/* Edit Product & Barcode Modal */}
+      {showEditProductModal && productToEdit && (
+        <EditProductModal
+          isOpen={showEditProductModal}
+          product={productToEdit}
+          categories={categoryObjects}
+          onClose={() => {
+            setShowEditProductModal(false);
+            setProductToEdit(null);
+          }}
+          onSave={handleSaveProduct}
+          onDelete={async (id) => {
+            await deleteProduct(id);
+            setShowEditProductModal(false);
+            setProductToEdit(null);
+          }}
+          onOpenAddCategory={() => {
+            setShowAddCategoryModal(true);
           }}
         />
       )}
