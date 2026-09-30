@@ -370,7 +370,86 @@ export interface LocalBackupData {
     tabs_count: number;
     requisitions_count: number;
     backup_tool: string;
+    exported_by_user?: string;
+    exported_at?: string;
   };
+}
+
+// =========================================================================
+// AUDIT LOGGING & TAMPER-EVIDENT MERKLE CHAIN
+// =========================================================================
+export type AuditSeverity = 'INFO' | 'WARN' | 'CRITICAL' | 'SECURITY';
+
+export type AuditAction =
+  | 'SALE_COMPLETED'
+  | 'SALE_VOIDED'
+  | 'SALE_REFUNDED'
+  | 'PRICE_CHANGED'
+  | 'STOCK_ADJUSTED'
+  | 'STOCK_UPLOADED'
+  | 'PRODUCT_ADDED'
+  | 'PRODUCT_EDITED'
+  | 'PRODUCT_DELETED'
+  | 'CATEGORY_ADDED'
+  | 'CATEGORY_DELETED'
+  | 'SHIFT_OPENED'
+  | 'SHIFT_CLOSED'
+  | 'CASH_DROP'
+  | 'CASH_PAYOUT'
+  | 'DRAWER_FLOAT_CHANGED'
+  | 'USER_LOGIN'
+  | 'USER_LOGOUT'
+  | 'USER_ADDED'
+  | 'USER_SUSPENDED'
+  | 'PASSWORD_RESET'
+  | 'CUSTOMER_DEBT_ADDED'
+  | 'CUSTOMER_DEBT_REPAID'
+  | 'STORE_CONFIG_CHANGED'
+  | 'DATABASE_RESTORED'
+  | 'DATABASE_BACKED_UP';
+
+export interface AuditActor {
+  id?: number | string;
+  userId?: number | string;
+  name: string;
+  role: string;
+  username?: string;
+  ip?: string;
+}
+
+export interface AuditLogEntry {
+  sequenceNumber: number;
+  id: string;
+  timestamp: string;
+  storeId?: string;
+  action: AuditAction;
+  severity: AuditSeverity;
+  actor: AuditActor;
+  entityType: string;
+  entityId?: string | number;
+  summary: string;
+  details?: Record<string, any>;
+  previousHash: string;
+  hash: string;
+}
+
+export interface AuditChainVerificationResult {
+  isValid: boolean;
+  totalRecords: number;
+  totalEntries?: number;
+  verifiedCount?: number;
+  brokenIndex?: number;
+  brokenEntryId?: string;
+  compromisedIndex?: number;
+  compromisedRecordId?: string;
+  failureReason?: string;
+  errorMessage?: string;
+  computedHash?: string;
+  expectedHash?: string;
+  genesisHash?: string;
+  latestHash?: string;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
 }
 
 // =========================================================================

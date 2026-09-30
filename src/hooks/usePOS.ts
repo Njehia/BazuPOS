@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   query,
   orderBy,
@@ -194,6 +195,13 @@ export function usePOS(customTenantId?: string) {
           setIsLoading(false);
           setError(null);
         } else {
+          // If the inventory was intentionally cleared by Administrator, do not auto-seed
+          if (LocalDb.isProductsCleared(tenantId)) {
+            setProducts([]);
+            setIsLoading(false);
+            return;
+          }
+
           // Auto-seed initial catalog if completely empty
           AuthService.seedTenantCatalog(tenantId)
             .then(() => {
@@ -435,6 +443,7 @@ export function usePOS(customTenantId?: string) {
           low_stock_threshold: product.lowStockThreshold || 10,
         });
 
+        LocalDb.setProductsCleared(false, tenantId);
         return prodId;
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `tenants/${tenantId}/products`);
@@ -543,6 +552,7 @@ export function usePOS(customTenantId?: string) {
   const seedFullCatalog = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     try {
+      LocalDb.setProductsCleared(false, tenantId);
       await AuthService.seedTenantCatalog(tenantId);
       // Seed LocalDb as well
       const currentProducts = LocalDb.getProducts();
@@ -555,6 +565,52 @@ export function usePOS(customTenantId?: string) {
       setIsLoading(false);
     }
   }, [tenantId]);
+
+  /**
+   * Delete all products with Administrator password verification
+   */
+  const deleteAllProducts = useCallback(
+    async (
+      passwordAttempt: string,
+      adminUser?: any
+    ): Promise<{ success: boolean; count: number; error?: string }> => {
+      // 1. Verify admin credentials
+      const isVerified = LocalDb.verifyAdminPassword(passwordAttempt, adminUser);
+      if (!isVerified) {
+        return {
+          success: false,
+          count: 0,
+          error: 'Verification Failed: Incorrect administrator password. Deletion cancelled.',
+        };
+      }
+
+      try {
+        LocalDb.setProductsCleared(true, tenantId);
+
+        // Delete all products from Firestore tenant subcollection
+        const productsCol = collection(db, 'tenants', tenantId, 'products');
+        const snapshot = await getDocs(productsCol);
+        if (!snapshot.empty) {
+          const batch = writeBatch(db);
+          snapshot.forEach((docSnap) => {
+            batch.delete(docSnap.ref);
+          });
+          await batch.commit();
+        }
+
+        // Also purge from LocalDb
+        LocalDb.deleteAllProducts('ADMIN', passwordAttempt, adminUser);
+        setProducts([]);
+        return { success: true, count: snapshot.size || products.length };
+      } catch (err: any) {
+        console.warn('Firestore deleteAllProducts fallback to local:', err);
+        LocalDb.deleteAllProducts('ADMIN', passwordAttempt, adminUser);
+        setProducts([]);
+        return { success: true, count: products.length };
+      }
+    },
+    [tenantId, products]
+  );
 
   /**
    * Start a new Cashier Shift
@@ -617,6 +673,7 @@ export function usePOS(customTenantId?: string) {
     addProduct,
     updateProduct,
     deleteProduct,
+    deleteAllProducts,
     addCategory,
     deleteCategory,
     seedFullCatalog,

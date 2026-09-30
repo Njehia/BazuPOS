@@ -702,4 +702,14 @@ export class CloudDb {
       }
     );
   }
+
+  static async recordAuditLog(entry: any): Promise<void> {
+    try {
+      const ref = getStoreDocRef('audit_logs', String(entry.id));
+      await setDoc(ref, entry, { merge: true });
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.recordAuditLog error:', err);
+    }
+  }
 }

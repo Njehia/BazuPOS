@@ -37,6 +37,7 @@ import { buildESCPOSShiftReport, printViaWebBluetooth, printViaWebUSB } from '..
 import { ShiftSummaryReport, StoreConfig } from '../types';
 import { AddCategoryModal } from './AddCategoryModal';
 import { EditProductModal, EditableProductData } from './EditProductModal';
+import { DeleteAllProductsModal } from './DeleteAllProductsModal';
 
 interface OwnerDashboardProps {
   onBackToTerminal?: () => void;
@@ -54,6 +55,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
     addProduct,
     updateProduct,
     deleteProduct,
+    deleteAllProducts,
     addCategory,
     deleteCategory,
     seedFullCatalog,
@@ -66,6 +68,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
   const [tenantStaff, setTenantStaff] = useState<TenantUser[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'inventory' | 'categories' | 'alerts' | 'shifts' | 'staff' | 'settings'>('overview');
   const [ownerFeedback, setOwnerFeedback] = useState<string | null>(null);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
 
   // Automated Inventory Alert & Reorder Threshold State
   const [reorderThreshold, setReorderThreshold] = useState<number>(() => {
@@ -1566,6 +1569,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">Seed 150+ Items</span>
                 </button>
+
+                <button
+                  onClick={() => setShowDeleteAllModal(true)}
+                  disabled={products.length === 0}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Delete all products from inventory (requires admin password verification)"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete All Products</span>
+                </button>
               </div>
             </div>
 
@@ -2380,6 +2393,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
           }}
           onOpenAddCategory={() => {
             setShowAddCategoryModal(true);
+          }}
+        />
+      )}
+
+      {/* Delete All Products Modal with Administrator Password Verification */}
+      {showDeleteAllModal && (
+        <DeleteAllProductsModal
+          isOpen={showDeleteAllModal}
+          totalProductsCount={products.length}
+          onClose={() => setShowDeleteAllModal(false)}
+          onConfirmCustom={async (password) => {
+            return await deleteAllProducts(password);
+          }}
+          onSuccess={(deletedCount) => {
+            setShowDeleteAllModal(false);
+            setOwnerFeedback(`All ${deletedCount} products permanently deleted from store inventory.`);
+            setTimeout(() => setOwnerFeedback(null), 5000);
           }}
         />
       )}

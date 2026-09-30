@@ -23,10 +23,10 @@ export default function App() {
   const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [activeTenantId, setActiveTenant] = useState<string>(getActiveTenantId());
 
-  // Check and purge legacy demo data on first boot if needed
+  // Seamless upgrade & persistence safeguard on boot (ensures stocks, sales & settings are preserved)
   useEffect(() => {
     try {
-      LocalDb.purgeLegacyDemoDataIfNeeded();
+      LocalDb.ensureSeamlessUpgradeAndPreserveData();
       const config = LocalDb.getStoreConfig();
       applyStoreTheme(config);
       const mode = getStoredThemeMode();
@@ -38,7 +38,7 @@ export default function App() {
 
   const [isFirstTimeSetup, setIsFirstTimeSetup] = useState<boolean>(() => {
     try {
-      LocalDb.purgeLegacyDemoDataIfNeeded();
+      LocalDb.ensureSeamlessUpgradeAndPreserveData();
       return !LocalDb.isSetupCompleted();
     } catch {
       return false;

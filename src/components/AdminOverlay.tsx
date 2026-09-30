@@ -81,6 +81,7 @@ import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { FirstTimeSetupModal } from './FirstTimeSetupModal';
 import { MerchantSignupModal } from './MerchantSignupModal';
+import { DeleteAllProductsModal } from './DeleteAllProductsModal';
 
 export type AdminTab = 'inventory' | 'requisitions' | 'categories' | 'transactions' | 'summary' | 'customers' | 'users' | 'store';
 
@@ -126,8 +127,10 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
   const [newPriceInput, setNewPriceInput] = useState<string>('');
   const [newThresholdInput, setNewThresholdInput] = useState<string>('');
   const [productFeedbackError, setProductFeedbackError] = useState<string | null>(null);
+  const [productFeedbackSuccess, setProductFeedbackSuccess] = useState<string | null>(null);
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
 
   // Reorder Replenishment Slip modal state
   const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
@@ -1005,6 +1008,22 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
               </div>
             )}
 
+            {productFeedbackSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span className="font-semibold">{productFeedbackSuccess}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProductFeedbackSuccess(null)}
+                  className="p-1 text-emerald-400 hover:text-emerald-700 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* PROACTIVE LIQUOR SUPPLY MANAGEMENT ALERT BANNER */}
             <div
               className={`p-4 sm:p-5 rounded-2xl border transition-all ${
@@ -1172,17 +1191,30 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
                   </button>
 
                   {isAdmin ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProductFeedbackError(null);
-                        setIsAddModalOpen(true);
-                      }}
-                      className="py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-450 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-98 cursor-pointer shrink-0"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Add Product</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductFeedbackError(null);
+                          setIsAddModalOpen(true);
+                        }}
+                        className="py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-450 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-98 cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Add Product</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsDeleteAllModalOpen(true)}
+                        disabled={products.length === 0}
+                        className="py-2.5 px-3.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                        title="Delete all products from inventory (requires admin password verification)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Delete All Products</span>
+                      </button>
+                    </div>
                   ) : (
                     <div
                       className="py-2.5 px-3 rounded-xl bg-slate-100 text-slate-500 border border-slate-200 text-xs flex items-center gap-1.5 font-medium select-none shrink-0"
@@ -3287,6 +3319,23 @@ export const AdminOverlay: React.FC<AdminOverlayProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* DELETE ALL PRODUCTS WITH ADMIN PASSWORD VERIFICATION MODAL */}
+      {isDeleteAllModalOpen && (
+        <DeleteAllProductsModal
+          isOpen={isDeleteAllModalOpen}
+          totalProductsCount={products.length}
+          currentUser={currentUser}
+          onClose={() => setIsDeleteAllModalOpen(false)}
+          onSuccess={(count) => {
+            setIsDeleteAllModalOpen(false);
+            setProductFeedbackSuccess(`Successfully deleted all ${count} products from inventory.`);
+            setTimeout(() => setProductFeedbackSuccess(null), 5000);
+            onInventoryChanged();
+            setProducts(LocalDb.getProducts());
+          }}
+        />
       )}
 
       {/* BARCODE SCANNER MODAL FOR EDITING */}
