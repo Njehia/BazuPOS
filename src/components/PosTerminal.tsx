@@ -1027,7 +1027,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout,
               </div>
 
               {/* Bottom Bar: Search Product & Shift Status */}
-              <div className="mt-auto p-4 bg-slate-900 dark:bg-slate-950 flex flex-wrap sm:flex-nowrap items-center gap-4 text-white shrink-0 border-t border-slate-800">
+              <div className="mt-auto mb-14 md:mb-0 p-3 sm:p-4 bg-slate-900 dark:bg-slate-950 flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 text-white shrink-0 border-t border-slate-800">
                 <div className="flex-1 min-w-[240px]">
                   <div className="flex items-center justify-between text-[10px] uppercase text-slate-400 font-bold mb-1 tracking-widest">
                     <span className="flex items-center gap-1.5">
@@ -1108,7 +1108,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ currentUser, onLogout,
 
           {/* Mobile & Minimized Screen Floating Cart Bar (Appears when cart has items) */}
           {cart.length > 0 && !isMobileCartOpen && (
-            <div className="lg:hidden px-3 py-2.5 bg-slate-900 dark:bg-slate-950 text-white border-t border-slate-800 shadow-xl flex items-center justify-between gap-3 shrink-0 z-20">
+            <div className="lg:hidden mb-14 md:mb-0 px-3 py-2.5 bg-slate-900 dark:bg-slate-950 text-white border-t border-slate-800 shadow-xl flex items-center justify-between gap-3 shrink-0 z-20">
               <button
                 type="button"
                 onClick={() => setIsMobileCartOpen(true)}

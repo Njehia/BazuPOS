@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "build:apk": "node scripts/create-apk-package.js",
+    "release:apk": "bash scripts/publish-apk-github-release.sh",
     "electron:dev": "concurrently \"tsx server.ts\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron-builder --win nsis"
   },

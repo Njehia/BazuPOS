@@ -1,0 +1,97 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    tags:
+      - 'POS'
+      - 'v*'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub Release Tag to upload the APK to'
+        required: true
+        default: 'POS'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Android APK (Bazu.POS.1.2.0.apk)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Web Dependencies
+        run: npm ci
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Offline Assets for Android
+        run: |
+          mkdir -p android/app/src/main/assets/dist
+          cp -r dist/* android/app/src/main/assets/dist/
+
+      - name: Setup Gradle Wrapper
+        run: |
+          cd android
+          gradle wrapper || true
+
+      - name: Build Android Release APK
+        run: |
+          cd android
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleRelease || ./gradlew assembleDebug
+          else
+            gradle assembleRelease || gradle assembleDebug
+          fi
+
+      - name: Locate and Package APK
+        id: package_apk
+        run: |
+          APK_FILE=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "Error: No APK found after build"
+            exit 1
+          fi
+          echo "Found APK at: $APK_FILE"
+          cp "$APK_FILE" ./Bazu.POS.1.2.0.apk
+          echo "apk_path=./Bazu.POS.1.2.0.apk" >> $GITHUB_OUTPUT
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bazu-POS-Android-APK
+          path: ./Bazu.POS.1.2.0.apk
+          retention-days: 90
+
+      - name: Upload APK to GitHub Releases (Tag: POS)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          files: ./Bazu.POS.1.2.0.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

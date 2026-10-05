@@ -79,9 +79,60 @@
         "totalSales": { "type": "number", "description": "Total sales accumulated during this shift" }
       },
       "required": ["cashierId", "openTime", "openingCash"]
+    },
+    "stores": {
+      "title": "Store",
+      "description": "Isolated store entity for multi-platform tenant architecture",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string", "description": "Predictable unique store identifier" },
+        "name": { "type": "string", "description": "Store display name" },
+        "ownerUid": { "type": "string", "description": "Firebase Auth UID of store administrator" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "status": { "type": "string", "description": "Store lifecycle status e.g. active, suspended" }
+      },
+      "required": ["storeId", "name", "ownerUid", "createdAt", "status"]
+    },
+    "users": {
+      "title": "UserProfile",
+      "description": "Global user account mapped to store and role",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "role": { "type": "string", "description": "admin, staff, cashier, or manager" },
+        "storeId": { "type": "string", "description": "Associated store identifier" },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp" },
+        "status": { "type": "string", "description": "active or suspended" }
+      },
+      "required": ["uid", "email", "role", "storeId", "createdAt"]
     }
   },
   "firestore": {
+    "/users/{uid}": {
+      "schema": "users",
+      "description": "User profile with role and storeId mapping"
+    },
+    "/stores/{storeId}": {
+      "schema": "stores",
+      "description": "Store metadata with ownerUid and status"
+    },
+    "/stores/{storeId}/products/{productId}": {
+      "schema": "tenant_products",
+      "description": "Store-isolated product catalog"
+    },
+    "/stores/{storeId}/sales/{saleId}": {
+      "schema": "tenant_sales",
+      "description": "Store-isolated completed transactions"
+    },
+    "/stores/{storeId}/inventory/{itemId}": {
+      "schema": "tenant_products",
+      "description": "Store-isolated stock inventory control"
+    },
+    "/stores/{storeId}/staff/{staffId}": {
+      "schema": "tenant_users",
+      "description": "Store-isolated staff and cashier accounts"
+    },
     "/tenants/{tenantId}": {
       "schema": "tenants",
       "description": "Root tenant organization document"
@@ -105,6 +156,22 @@
     "/tenants/{tenantId}/shifts/{shiftId}": {
       "schema": "tenant_shifts",
       "description": "Tenant cashier shift records and X/Z reports"
+    },
+    "/businesses/{businessId}": {
+      "schema": "tenants",
+      "description": "Root business document with name and ownerUid"
+    },
+    "/businesses/{businessId}/staff/{staffId}": {
+      "schema": "tenant_users",
+      "description": "Business staff and cashier permissions"
+    },
+    "/businesses/{businessId}/products/{productId}": {
+      "schema": "tenant_products",
+      "description": "Business-isolated product inventory"
+    },
+    "/businesses/{businessId}/sales/{saleId}": {
+      "schema": "tenant_sales",
+      "description": "Business-isolated sales transactions"
     }
   }
 }

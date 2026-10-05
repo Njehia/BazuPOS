@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bazupos.app",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:7F:0F:52:EA:CB:25:40:5A:04:A7:9A:AC:E1:42:9D:F5:AB:5E:86:EC:D8:08:0A:EB:EC:83:B4:99:C4"
+      ]
+    }
+  }
+]

@@ -6,9 +6,42 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#0A1124",
   "theme_color": "#0A1124",
+  "categories": ["business", "finance", "shopping", "utilities"],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Quick POS Sale",
+      "short_name": "New Sale",
+      "description": "Open POS screen for instant sales entry",
+      "url": "/?screen=pos_classic",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Checkout Terminal",
+      "short_name": "Terminal",
+      "description": "Open Touch Terminal with M-Pesa",
+      "url": "/?screen=checkout_terminal",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Customer Tabs",
+      "short_name": "Bar Tabs",
+      "description": "View open customer bar tabs",
+      "url": "/?screen=tabs",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Owner Dashboard",
+      "short_name": "Owner",
+      "description": "Sales analytics, inventory, and staff management",
+      "url": "/?screen=owner_dashboard",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/pwa-192x192.png",

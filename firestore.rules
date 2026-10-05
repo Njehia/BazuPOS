@@ -1,96 +1,222 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isTenantUser(tenantId) {
-      return isSignedIn() && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
+    // =========================================================================
+    // 1. UNIFIED BAZU POS MULTI-PLATFORM STORE-ISOLATED ARCHITECTURE
+    // Structure:
+    // users/{uid} -> { uid, email, role, storeId, createdAt, status }
+    // stores/{storeId} -> { storeId, name, ownerUid, createdAt, status }
+    //     products/{productId}
+    //     sales/{saleId}
+    //     inventory/{itemId}
+    //     staff/{staffId}
+    //     categories/{categoryId}
+    //     shifts/{shiftId}
+    // =========================================================================
+
+    function hasUserProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function getTenantUser(tenantId) {
-      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid)).data;
+    function getUserProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isTenantAdmin(tenantId) {
-      return isTenantUser(tenantId) && (getTenantUser(tenantId).role in ['admin', 'super_admin']);
+    function isStoreUser(storeId) {
+      return isSignedIn() && (
+        (hasUserProfile() && getUserProfile().storeId == storeId) ||
+        (exists(/databases/$(database)/documents/stores/$(storeId)) && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid) ||
+        exists(/databases/$(database)/documents/stores/$(storeId)/staff/$(request.auth.uid)) ||
+        // Backwards compatibility with business/tenant mappings
+        exists(/databases/$(database)/documents/businesses/$(storeId)/staff/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/tenants/$(storeId)/users/$(request.auth.uid))
+      );
     }
 
-    function isSubscriptionActive(tenantId) {
-      return get(/databases/$(database)/documents/tenants/$(tenantId)).data.subscriptionStatus in ['active', 'trial'];
+    function isStoreAdmin(storeId) {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/stores/$(storeId)) && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid) ||
+        (hasUserProfile() && getUserProfile().storeId == storeId && getUserProfile().role in ['admin', 'owner', 'super_admin']) ||
+        (exists(/databases/$(database)/documents/stores/$(storeId)/staff/$(request.auth.uid)) && get(/databases/$(database)/documents/stores/$(storeId)/staff/$(request.auth.uid)).data.role in ['admin', 'owner', 'super_admin'])
+      );
+    }
+
+    // Root Collection: users (Profile & storeId mapping)
+    match /users/{uid} {
+      // User can read their own profile, or store admin can read profiles of staff in their store
+      allow read: if isSignedIn() && (
+        request.auth.uid == uid ||
+        (hasUserProfile() && isStoreAdmin(resource.data.storeId))
+      );
+
+      // User creates their own profile upon registration, or store admin adds staff
+      allow create: if isSignedIn() && (
+        request.auth.uid == uid ||
+        (hasUserProfile() && isStoreAdmin(request.resource.data.storeId))
+      );
+
+      // User updates their own profile (e.g. name), or admin updates role/store mapping
+      allow update: if isSignedIn() && (
+        request.auth.uid == uid ||
+        (hasUserProfile() && isStoreAdmin(resource.data.storeId))
+      );
+
+      // Only store admin can delete a user mapping
+      allow delete: if isSignedIn() && hasUserProfile() && isStoreAdmin(resource.data.storeId);
+    }
+
+    // Root Collection: stores (Store metadata & subcollections)
+    match /stores/{storeId} {
+      // Store staff and owners can read store metadata
+      allow read: if isStoreUser(storeId);
+
+      // Web registration creates store document with authenticated user as owner
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+
+      // Only store admin / owner can update store settings
+      allow update: if isStoreAdmin(storeId);
+
+      // Only owner can delete the store
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+
+      // Subcollection: products (Catalog items)
+      match /products/{productId} {
+        allow read: if isStoreUser(storeId);
+        allow create, update: if isStoreUser(storeId);
+        allow delete: if isStoreAdmin(storeId);
+      }
+
+      // Subcollection: sales (Checkout transactions)
+      match /sales/{saleId} {
+        allow read: if isStoreUser(storeId);
+        allow create: if isStoreUser(storeId);
+        allow update, delete: if isStoreAdmin(storeId);
+      }
+
+      // Subcollection: inventory (Stock adjustments & control)
+      match /inventory/{itemId} {
+        allow read: if isStoreUser(storeId);
+        allow write: if isStoreAdmin(storeId);
+      }
+
+      // Subcollection: staff (Staff credentials & terminal PINs)
+      match /staff/{staffId} {
+        allow read: if isStoreUser(storeId);
+        allow create, update, delete: if isStoreAdmin(storeId) || (isSignedIn() && request.auth.uid == staffId);
+      }
+
+      // Subcollection: categories
+      match /categories/{categoryId} {
+        allow read: if isStoreUser(storeId);
+        allow write: if isStoreUser(storeId);
+      }
+
+      // Subcollection: shifts (Cash drawer audits & reports)
+      match /shifts/{shiftId} {
+        allow read: if isStoreUser(storeId);
+        allow write: if isStoreUser(storeId);
+      }
+
+      // Subcollection: customers & debt records
+      match /customers/{customerId} {
+        allow read, write: if isStoreUser(storeId);
+      }
+
+      match /customer_payments/{paymentId} {
+        allow read, write: if isStoreUser(storeId);
+      }
+
+      match /requisitions/{reqId} {
+        allow read, write: if isStoreUser(storeId);
+      }
+
+      match /store_config/{configId} {
+        allow read: if isStoreUser(storeId);
+        allow write: if isStoreAdmin(storeId);
+      }
+
+      match /{allStoreSubpaths=**} {
+        allow read, write: if isStoreUser(storeId);
+      }
+    }
+
+    // =========================================================================
+    // 2. BACKWARDS-COMPATIBILITY: BUSINESSES & TENANTS ARCHITECTURE
+    // =========================================================================
+    function isBusinessOwner(businessId) {
+      return isSignedIn() && (
+        request.auth.uid == get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid
+      );
+    }
+
+    function isBusinessStaff(businessId) {
+      return isSignedIn() && (
+        isBusinessOwner(businessId) ||
+        exists(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid))
+      );
+    }
+
+    function isBusinessAdmin(businessId) {
+      return isSignedIn() && (
+        isBusinessOwner(businessId) ||
+        (exists(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/businesses/$(businessId)/staff/$(request.auth.uid)).data.role in ['owner', 'admin', 'super_admin', 'manager'])
+      );
+    }
+
+    match /businesses/{businessId} {
+      allow read: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isBusinessStaff(businessId));
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isBusinessAdmin(businessId));
+      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+
+      match /staff/{staffId} {
+        allow read: if isBusinessStaff(businessId);
+        allow write: if isBusinessAdmin(businessId) || (isSignedIn() && request.auth.uid == staffId);
+      }
+
+      match /users/{userId} {
+        allow read: if isBusinessStaff(businessId);
+        allow write: if isBusinessAdmin(businessId) || (isSignedIn() && request.auth.uid == userId);
+      }
+
+      match /products/{productId} {
+        allow read, write: if isBusinessStaff(businessId);
+      }
+
+      match /sales/{saleId} {
+        allow read, create: if isBusinessStaff(businessId);
+        allow update, delete: if isBusinessAdmin(businessId);
+      }
+
+      match /categories/{categoryId} {
+        allow read, write: if isBusinessStaff(businessId);
+      }
+
+      match /shifts/{shiftId} {
+        allow read, write: if isBusinessStaff(businessId);
+      }
+
+      match /customers/{customerId} {
+        allow read, write: if isBusinessStaff(businessId);
+      }
+    }
+
+    match /tenants/{tenantId} {
+      allow read, write: if isSignedIn();
+      match /{allTenantSubpaths=**} {
+        allow read, write: if isSignedIn();
+      }
     }
 
     // Default deny catch-all
     match /{document=**} {
       allow read, write: if false;
     }
-
-    // Multi-tenant root structure: tenants/{tenantId}
-    match /tenants/{tenantId} {
-      // Tenant document read & writes
-      allow read: if isSignedIn() && (
-        resource.data.ownerUid == request.auth.uid ||
-        isTenantUser(tenantId)
-      );
-      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isSignedIn() && (
-        resource.data.ownerUid == request.auth.uid ||
-        isTenantAdmin(tenantId)
-      );
-
-      // Subcollection: users/{userId}
-      match /users/{userId} {
-        allow read: if isTenantUser(tenantId);
-        allow create: if isSignedIn() && (
-          request.auth.uid == userId ||
-          isTenantAdmin(tenantId)
-        );
-        allow update, delete: if isSignedIn() && (
-          request.auth.uid == userId ||
-          isTenantAdmin(tenantId)
-        );
-      }
-
-      // Subcollection: categories/{categoryId}
-      match /categories/{categoryId} {
-        allow read: if isTenantUser(tenantId);
-        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
-      }
-
-      // Subcollection: products/{productId}
-      match /products/{productId} {
-        allow read: if isTenantUser(tenantId);
-        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
-      }
-
-      // Subcollection: sales/{saleId}
-      match /sales/{saleId} {
-        allow read: if isTenantUser(tenantId);
-        allow create: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
-        allow update, delete: if isTenantAdmin(tenantId);
-      }
-
-      // Subcollection: shifts/{shiftId}
-      match /shifts/{shiftId} {
-        allow read: if isTenantUser(tenantId);
-        allow write: if isTenantUser(tenantId) && isSubscriptionActive(tenantId);
-      }
-    }
-
-    // Multi-store backwards-compatible paths
-    match /stores/{storeId}/{document=**} {
-      allow read, write: if true;
-    }
-    match /products/{id} { allow read, write: if true; }
-    match /sales/{id} { allow read, write: if true; }
-    match /sale_items/{id} { allow read, write: if true; }
-    match /users/{id} { allow read, write: if true; }
-    match /store_config/{id} { allow read, write: if true; }
-    match /categories/{id} { allow read, write: if true; }
-    match /customers/{id} { allow read, write: if true; }
-    match /customer_payments/{id} { allow read, write: if true; }
-    match /requisitions/{id} { allow read, write: if true; }
   }
 }

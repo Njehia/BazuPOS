@@ -134,6 +134,7 @@ export const DeleteAllProductsModal: React.FC<DeleteAllProductsModalProps> = ({
                 }}
                 disabled={isDeleting}
                 autoFocus
+                autoComplete="current-password"
                 placeholder="Enter Admin Password"
                 className="w-full pl-9 pr-10 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all font-mono"
               />

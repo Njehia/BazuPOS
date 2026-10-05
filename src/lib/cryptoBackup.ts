@@ -125,6 +125,7 @@ export class CryptoBackupService {
       false,
       ['deriveKey']
     );
+
     return await window.crypto.subtle.deriveKey(
       {
         name: 'PBKDF2',
@@ -160,8 +161,6 @@ export class CryptoBackupService {
     const customer_payments = LocalDb.getCustomerPayments();
     const customer_tabs = LocalDb.getCustomerTabs();
     const requisitions = LocalDb.getRequisitions();
-    const shifts = LocalDb.getShifts();
-    const cash_adjustments = LocalDb.getCashAdjustments();
     const categories = LocalDb.getCategories();
 
     return {
@@ -203,6 +202,7 @@ export class CryptoBackupService {
     if (!window.crypto || !window.crypto.subtle) {
       throw new Error('Web Cryptography API is not supported on this browser or platform.');
     }
+
     const passphrase = customPassphrase || this.getDeviceMasterSecret();
     const jsonStr = JSON.stringify(data);
     const checksum = await this.computeChecksum(jsonStr);
@@ -215,6 +215,7 @@ export class CryptoBackupService {
 
     const key = await this.deriveKey(passphrase, salt);
     const enc = new TextEncoder();
+
     const encryptedBuf = await window.crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       key,
@@ -426,9 +427,9 @@ export class CryptoBackupService {
     const data = this.collectCurrentDatabaseState();
     const envelope = await this.encryptDatabase(data, 'MANUAL', customPassphrase);
     const jsonStr = JSON.stringify(envelope, null, 2);
+
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-
     const cleanStore = (data.store_name || 'Store').replace(/[^a-zA-Z0-9_-]/g, '_');
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = `BazuPOS_Encrypted_Backup_${cleanStore}_${dateStr}.bazubak`;
@@ -440,7 +441,6 @@ export class CryptoBackupService {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
     return filename;
   }
 

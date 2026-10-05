@@ -64,6 +64,7 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (product) {
@@ -448,19 +449,37 @@ export const EditProductModal: React.FC<EditProductModalProps> = ({
             {/* Footer Buttons */}
             <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
               {onDelete ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm(`Delete product "${product.name}"?`)) {
-                      onDelete(product.id);
-                      onClose();
-                    }
-                  }}
-                  className="px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors flex items-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete</span>
-                </button>
+                confirmDelete ? (
+                  <div className="flex items-center gap-1.5 animate-in fade-in">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDelete(product.id);
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-xl transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Confirm Delete</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(true)}
+                    className="px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                )
               ) : (
                 <div />
               )}

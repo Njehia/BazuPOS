@@ -28,6 +28,8 @@ import {
   Store,
   Edit2,
   RefreshCw,
+  ShoppingBag,
+  X,
 } from 'lucide-react';
 import { usePOS, TenantProduct } from '../hooks/usePOS';
 import { CartItem, ProductVariant, User } from '../types';
@@ -67,6 +69,7 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
   // State
   const [tenantMeta, setTenantMeta] = useState<TenantMetadata | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [showQuickKeysOnly, setShowQuickKeysOnly] = useState(false);
@@ -485,6 +488,20 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          {/* Mobile Cart Trigger Button */}
+          <button
+            onClick={() => setIsMobileCartOpen(true)}
+            className="md:hidden relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer"
+            title="View Cart"
+          >
+            <ShoppingBag className="w-4 h-4 text-amber-400" />
+            {totalItemsCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-amber-500 text-slate-950 font-black text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+                {totalItemsCount}
+              </span>
+            )}
+          </button>
+
           {onOpenOwnerDashboard && (
             <button
               onClick={onOpenOwnerDashboard}
@@ -687,8 +704,8 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
           </div>
         </div>
 
-        {/* Right Side: Cart & Checkout Tray */}
-        <div className="w-full md:w-96 flex flex-col bg-slate-950 border-t md:border-t-0 border-slate-800">
+        {/* Right Side: Cart & Checkout Tray (Desktop) */}
+        <div className="hidden md:flex md:w-96 flex-col bg-slate-950 border-t md:border-t-0 border-slate-800">
           {/* Cart Header */}
           <div className="p-3 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -829,6 +846,151 @@ export const CheckoutTerminal: React.FC<CheckoutTerminalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Mobile Sticky Floating Cart Action Bar */}
+      {cart.length > 0 && (
+        <div className="md:hidden fixed bottom-14 left-0 right-0 p-3 z-30 pointer-events-none">
+          <div className="max-w-md mx-auto pointer-events-auto bg-slate-950/95 backdrop-blur-md border border-amber-500/40 rounded-2xl p-2.5 shadow-2xl flex items-center justify-between gap-3">
+            <button
+              onClick={() => setIsMobileCartOpen(true)}
+              className="flex items-center gap-2.5 text-left flex-1 min-w-0 cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <ShoppingBag className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] text-slate-400 font-bold">{totalItemsCount} items • Tap to review</p>
+                <p className="text-base font-black text-amber-400 font-mono leading-none">KES {subtotal.toLocaleString()}</p>
+              </div>
+            </button>
+
+            <button
+              onClick={handleOpenCheckout}
+              className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/25 active:scale-95 cursor-pointer shrink-0"
+            >
+              <span>Charge</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Full Cart Drawer */}
+      {isMobileCartOpen && (
+        <div className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex flex-col justify-end">
+          <div className="w-full max-h-[85vh] bg-slate-950 border-t border-slate-800 rounded-t-3xl flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-200">
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-amber-400" />
+                <h3 className="font-black text-base text-white">Current Order</h3>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300">
+                  {totalItemsCount} items
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {cart.length > 0 && (
+                  <button
+                    onClick={clearCart}
+                    className="text-xs font-semibold text-rose-400 hover:text-rose-300 px-2 py-1 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsMobileCartOpen(false)}
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Cart Items List */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-2.5 max-h-[50vh]">
+              {cart.map((item, idx) => {
+                const unitPrice = item.selectedVariant ? item.selectedVariant.price : item.product.price;
+                const lineTotal = unitPrice * item.quantity;
+                return (
+                  <div
+                    key={`mob_${item.product.id}_${item.selectedVariant?.id || 'std'}_${idx}`}
+                    className="p-3 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-sm text-white truncate">{item.product.name}</h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        KES {unitPrice.toLocaleString()} each
+                      </p>
+                    </div>
+
+                    {/* Stepper with large touch buttons */}
+                    <div className="flex items-center gap-2 bg-slate-800 rounded-xl p-1 border border-slate-700">
+                      <button
+                        onClick={() => updateQuantity(idx, -1)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-700 active:scale-95 cursor-pointer"
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
+                      <span className="font-bold text-sm w-6 text-center text-white font-mono">
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() => updateQuantity(idx, 1)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-700 active:scale-95 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="font-black text-sm text-amber-400 block font-mono">
+                        KES {lineTotal.toLocaleString()}
+                      </span>
+                      <button
+                        onClick={() => removeItem(idx)}
+                        className="text-xs text-rose-400 hover:text-rose-300 mt-1 cursor-pointer font-semibold"
+                      >
+                        Void
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {cart.length === 0 && (
+                <div className="py-8 text-center text-slate-500">
+                  <p className="text-sm font-semibold">Your cart is empty</p>
+                  <p className="text-xs mt-1 text-slate-600">Select products from the catalog to build an order</p>
+                </div>
+              )}
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/60 safe-area-pb space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</span>
+                <span className="font-black text-2xl text-amber-400 font-mono">KES {subtotal.toLocaleString()}</span>
+              </div>
+
+              <button
+                disabled={cart.length === 0}
+                onClick={() => {
+                  setIsMobileCartOpen(false);
+                  handleOpenCheckout();
+                }}
+                className={`w-full py-3.5 rounded-2xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                  cart.length > 0
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/25 active:scale-98 cursor-pointer'
+                    : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                }`}
+              >
+                <span>Proceed to Payment (KES {subtotal.toLocaleString()})</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment Selection Modal */}
       {showCheckoutModal && (

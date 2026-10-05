@@ -177,12 +177,14 @@ export function getActiveStoreId(): string {
 }
 
 export function setActiveStoreId(newStoreId: string): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   const clean = newStoreId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'store_main';
   localStorage.setItem('bazu_pos_active_store_id', clean);
 }
 
 // Active Tenant ID for SaaS Multi-Tenant architecture: tenants/{tenantId}
 export function getActiveTenantId(): string {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return 'tenant_bazu_hq';
   try {
     const tenant = localStorage.getItem('bazu_pos_active_tenant_id');
     if (tenant && tenant.trim()) {
@@ -195,6 +197,7 @@ export function getActiveTenantId(): string {
 }
 
 export function setActiveTenantId(tenantId: string): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   localStorage.setItem('bazu_pos_active_tenant_id', tenantId.trim());
 }
 
@@ -295,6 +298,23 @@ export class CloudDb {
       notifySyncStatus(true);
     } catch (err) {
       console.warn('CloudDb.deleteProduct error:', err);
+    }
+  }
+
+  static async deleteAllProducts(): Promise<void> {
+    try {
+      const colRef = getStoreColRef(COLLECTIONS.PRODUCTS);
+      const snapshot = await getDocs(colRef);
+      if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.forEach((docSnap) => {
+          batch.delete(docSnap.ref);
+        });
+        await batch.commit();
+      }
+      notifySyncStatus(true);
+    } catch (err) {
+      console.warn('CloudDb.deleteAllProducts error:', err);
     }
   }
 

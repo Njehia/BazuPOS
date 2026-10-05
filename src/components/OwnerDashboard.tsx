@@ -34,17 +34,18 @@ import {
 import { usePOS, TenantProduct, TenantSale, TenantShift } from '../hooks/usePOS';
 import { AuthService, TenantMetadata, TenantUser } from '../services/auth';
 import { buildESCPOSShiftReport, printViaWebBluetooth, printViaWebUSB } from '../lib/escpos';
-import { ShiftSummaryReport, StoreConfig } from '../types';
+import { ShiftSummaryReport, StoreConfig, User } from '../types';
 import { AddCategoryModal } from './AddCategoryModal';
 import { EditProductModal, EditableProductData } from './EditProductModal';
 import { DeleteAllProductsModal } from './DeleteAllProductsModal';
 
 interface OwnerDashboardProps {
+  currentUser?: User;
   onBackToTerminal?: () => void;
   onOpenNewStore?: () => void;
 }
 
-export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal, onOpenNewStore }) => {
+export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ currentUser, onBackToTerminal, onOpenNewStore }) => {
   const {
     tenantId,
     products,
@@ -380,8 +381,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
   // Bulk replenish alerted stock to safety stock
   const handleBulkReplenishAlerts = async () => {
     if (lowStockProducts.length === 0) return;
-    const confirmMsg = `Automatically restock all ${lowStockProducts.length} items to their target safety stock level (${reorderThreshold * 2} units)?`;
-    if (!window.confirm(confirmMsg)) return;
 
     setOwnerFeedback(`Replenishing ${lowStockProducts.length} products to safety stock...`);
     for (const p of lowStockProducts) {
@@ -435,14 +434,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
   const handleDeleteCategory = async (catId: string, catName: string) => {
     const count = products.filter((p) => p.category === catName).length;
     if (count > 0) {
-      alert(`Cannot delete category "${catName}" because ${count} product(s) are assigned to it. Please reassign or update them first.`);
+      setOwnerFeedback(`Cannot delete category "${catName}" because ${count} product(s) are assigned to it. Please reassign or update them first.`);
+      setTimeout(() => setOwnerFeedback(null), 4000);
       return;
     }
-    if (window.confirm(`Delete category "${catName}"?`)) {
-      await deleteCategory(catId);
-      setOwnerFeedback(`Category "${catName}" deleted.`);
-      setTimeout(() => setOwnerFeedback(null), 3000);
-    }
+    await deleteCategory(catId);
+    setOwnerFeedback(`Category "${catName}" deleted.`);
+    setTimeout(() => setOwnerFeedback(null), 3000);
   };
 
   const handleSaveProduct = async (id: string, updates: Partial<EditableProductData>) => {
@@ -1557,11 +1555,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
                 </button>
                 <button
                   onClick={async () => {
-                    if (window.confirm('Load 150+ products & 22 categories into this store?')) {
-                      await seedFullCatalog();
-                      setOwnerFeedback('Catalog loaded with 150+ products and categories!');
-                      setTimeout(() => setOwnerFeedback(null), 3000);
-                    }
+                    setOwnerFeedback('Loading 150+ products & 22 categories...');
+                    await seedFullCatalog();
+                    setOwnerFeedback('Catalog successfully loaded with 150+ products and categories!');
+                    setTimeout(() => setOwnerFeedback(null), 3500);
                   }}
                   className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 cursor-pointer"
                   title="Load standard multi-category catalog"
@@ -2402,9 +2399,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ onBackToTerminal
         <DeleteAllProductsModal
           isOpen={showDeleteAllModal}
           totalProductsCount={products.length}
+          currentUser={currentUser}
           onClose={() => setShowDeleteAllModal(false)}
           onConfirmCustom={async (password) => {
-            return await deleteAllProducts(password);
+            return await deleteAllProducts(password, currentUser);
           }}
           onSuccess={(deletedCount) => {
             setShowDeleteAllModal(false);

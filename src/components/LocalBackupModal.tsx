@@ -123,14 +123,6 @@ export const LocalBackupModal: React.FC<LocalBackupModalProps> = ({
   const handleApplyRestore = () => {
     if (!backupFile) return;
 
-    const confirmed = window.confirm(
-      restoreMode === 'REPLACE'
-        ? `Are you sure you want to restore? This will replace your local database with ${backupFile.products.length} products and ${backupFile.sales.length} sales from the backup file.`
-        : `Merge records from "${selectedFileName}" into your existing local database?`
-    );
-
-    if (!confirmed) return;
-
     setIsRestoring(true);
     setErrorMsg(null);
 

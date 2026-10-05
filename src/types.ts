@@ -1,4 +1,5 @@
 export type UserRole = 'ADMIN' | 'SUPERVISOR' | 'ACCOUNTANT' | 'SALES_CASHIER' | 'SALES';
+
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 
 export interface User {
@@ -114,6 +115,7 @@ export interface Customer {
   phone: string;
   email?: string;
   notes?: string;
+  current_debt?: number;
   created_at: string; // ISO string
   blacklisted?: boolean;
   blacklist_reason?: string;
@@ -157,6 +159,7 @@ export interface Sale {
   split_other_amount?: number;
   created_at: string; // ISO string
   mpesa_code?: string;
+  mpesa_reference?: string;
   cash_tendered?: number;
   change_given?: number;
   items_count: number;
@@ -172,6 +175,7 @@ export interface Sale {
   refund_reason?: string;
   refunded_at?: string;
   refunded_by?: string;
+  items?: any[];
 }
 
 export interface SaleItem {
@@ -203,6 +207,7 @@ export interface StoreConfig {
   low_stock_threshold?: number; // Store-wide default low stock alert threshold (defaults to 10)
   receipt_printer_width?: '80mm' | '58mm'; // Hardware thermal paper roll setting
   receipt_bold_mode?: boolean; // Ultra-bold deep thermal print head mode
+  currency?: string; // Currency symbol e.g. 'KES'
 }
 
 export interface CartItem {
@@ -376,83 +381,6 @@ export interface LocalBackupData {
 }
 
 // =========================================================================
-// AUDIT LOGGING & TAMPER-EVIDENT MERKLE CHAIN
-// =========================================================================
-export type AuditSeverity = 'INFO' | 'WARN' | 'CRITICAL' | 'SECURITY';
-
-export type AuditAction =
-  | 'SALE_COMPLETED'
-  | 'SALE_VOIDED'
-  | 'SALE_REFUNDED'
-  | 'PRICE_CHANGED'
-  | 'STOCK_ADJUSTED'
-  | 'STOCK_UPLOADED'
-  | 'PRODUCT_ADDED'
-  | 'PRODUCT_EDITED'
-  | 'PRODUCT_DELETED'
-  | 'CATEGORY_ADDED'
-  | 'CATEGORY_DELETED'
-  | 'SHIFT_OPENED'
-  | 'SHIFT_CLOSED'
-  | 'CASH_DROP'
-  | 'CASH_PAYOUT'
-  | 'DRAWER_FLOAT_CHANGED'
-  | 'USER_LOGIN'
-  | 'USER_LOGOUT'
-  | 'USER_ADDED'
-  | 'USER_SUSPENDED'
-  | 'PASSWORD_RESET'
-  | 'CUSTOMER_DEBT_ADDED'
-  | 'CUSTOMER_DEBT_REPAID'
-  | 'STORE_CONFIG_CHANGED'
-  | 'DATABASE_RESTORED'
-  | 'DATABASE_BACKED_UP';
-
-export interface AuditActor {
-  id?: number | string;
-  userId?: number | string;
-  name: string;
-  role: string;
-  username?: string;
-  ip?: string;
-}
-
-export interface AuditLogEntry {
-  sequenceNumber: number;
-  id: string;
-  timestamp: string;
-  storeId?: string;
-  action: AuditAction;
-  severity: AuditSeverity;
-  actor: AuditActor;
-  entityType: string;
-  entityId?: string | number;
-  summary: string;
-  details?: Record<string, any>;
-  previousHash: string;
-  hash: string;
-}
-
-export interface AuditChainVerificationResult {
-  isValid: boolean;
-  totalRecords: number;
-  totalEntries?: number;
-  verifiedCount?: number;
-  brokenIndex?: number;
-  brokenEntryId?: string;
-  compromisedIndex?: number;
-  compromisedRecordId?: string;
-  failureReason?: string;
-  errorMessage?: string;
-  computedHash?: string;
-  expectedHash?: string;
-  genesisHash?: string;
-  latestHash?: string;
-  firstTimestamp?: string;
-  lastTimestamp?: string;
-}
-
-// =========================================================================
 // SHIFTS & CASH ADJUSTMENTS (SHIFT AUDIT & CASH DRAWER MANAGEMENT)
 // =========================================================================
 export type ShiftStatus = 'OPEN' | 'CLOSED';
@@ -568,4 +496,62 @@ export interface ShiftSummaryReport {
   };
 }
 
+export type AuditAction =
+  | 'SALE_CREATED'
+  | 'SALE_VOIDED'
+  | 'PRODUCT_CREATED'
+  | 'PRODUCT_STOCK_UPDATED'
+  | 'PRODUCT_PRICE_UPDATED'
+  | 'PRODUCT_DELETED'
+  | 'PRODUCTS_CLEARED_ALL'
+  | 'STOCK_BULK_UPLOAD'
+  | 'SHIFT_OPENED'
+  | 'SHIFT_CLOSED'
+  | 'CASH_ADJUSTMENT'
+  | 'CUSTOMER_CREATED'
+  | 'CUSTOMER_PAYMENT_RECORDED'
+  | 'USER_LOGIN_SUCCESS'
+  | 'USER_LOGIN_FAILED'
+  | 'USER_CREATED'
+  | 'USER_UPDATED'
+  | 'USER_SUSPENDED'
+  | 'BACKUP_CREATED'
+  | 'BACKUP_RESTORED'
+  | 'STORE_CONFIG_UPDATED';
 
+export type AuditSeverity = 'INFO' | 'WARNING' | 'CRITICAL' | 'SECURITY';
+
+export interface AuditActor {
+  userId?: number | string;
+  name: string;
+  role?: string;
+  username?: string;
+}
+
+export interface AuditLogEntry {
+  sequenceNumber: number;
+  id: string;
+  timestamp: string;
+  action: AuditAction;
+  severity: AuditSeverity;
+  actor: AuditActor;
+  entityType: 'sale' | 'product' | 'customer' | 'shift' | 'cash' | 'user' | 'backup' | 'store';
+  entityId?: string | number;
+  summary: string;
+  details?: Record<string, any>;
+  previousHash: string;
+  hash: string;
+}
+
+export interface AuditChainVerificationResult {
+  isValid: boolean;
+  totalRecords: number;
+  verifiedCount: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  compromisedIndex?: number;
+  compromisedRecordId?: string;
+  failureReason?: string;
+  genesisHash: string;
+  latestHash: string;
+}

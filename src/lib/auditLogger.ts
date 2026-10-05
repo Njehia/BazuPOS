@@ -296,7 +296,6 @@ export class AuditLogger {
       totalEntries: logs.length,
       entries: logs,
     };
-
     const jsonStr = JSON.stringify(manifest, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -329,7 +328,6 @@ export class AuditLogger {
       'Entry Hash',
       'Previous Hash',
     ];
-
     const rows = logs.map((l) => [
       l.sequenceNumber,
       `"${l.timestamp}"`,
@@ -343,7 +341,6 @@ export class AuditLogger {
       `"${l.hash}"`,
       `"${l.previousHash}"`,
     ]);
-
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

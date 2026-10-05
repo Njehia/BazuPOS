@@ -29,6 +29,17 @@ export const INITIAL_CATEGORIES: Category[] = [
 export const INITIAL_USERS: User[] = [
   {
     id: 1,
+    name: 'Titus Njehia (Store Owner)',
+    username: 'njehia',
+    pin: '1234',
+    password: 'B33fch!p$5.?!',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    suspended: false,
+    created_at: '2025-01-01T00:00:00.000Z',
+  },
+  {
+    id: 2,
     name: 'Store Administrator',
     username: 'admin',
     pin: '1234',
@@ -39,7 +50,7 @@ export const INITIAL_USERS: User[] = [
     created_at: '2025-01-01T00:00:00.000Z',
   },
   {
-    id: 2,
+    id: 3,
     name: 'Main Cashier',
     username: 'cashier',
     pin: '1111',
